@@ -25,7 +25,13 @@ export const errorHandler: ErrorRequestHandler = (err, req, res, next) => {
       path: req.path,
     });
     if (err.statusCode >= 500) {
-      captureException(err, { requestId, path: req.path, method: req.method, code: err.code });
+      captureException(err, {
+        requestId,
+        path: req.path,
+        method: req.method,
+        code: err.code,
+        statusCode: err.statusCode,
+      });
     }
     res.status(err.statusCode).json({ ...err.toJSON(), requestId });
     return;
@@ -37,7 +43,7 @@ export const errorHandler: ErrorRequestHandler = (err, req, res, next) => {
     statusCode: 500,
     path: req.path,
   });
-  captureException(err, { requestId, path: req.path, method: req.method });
+  captureException(err, { requestId, path: req.path, method: req.method, statusCode: 500 });
   res.status(500).json({
     error: 'Internal server error',
     code: 'INTERNAL_ERROR',

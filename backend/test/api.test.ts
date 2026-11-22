@@ -41,6 +41,7 @@ describe('API', () => {
     expect(res.status).toBe(200);
     expect(res.body.ok).toBe(true);
     expect(res.body.fallback).toBe(true);
+    expect(res.body.persistence).toBe('in-memory');
     expect(typeof res.body.uptime).toBe('number');
     expect(res.body.memory).toBeDefined();
 
@@ -65,7 +66,7 @@ describe('API', () => {
 
     expect(res.status).toBe(200);
     expect(res.body.ok).toBe(true);
-    expect(res.body.database).toEqual({ configured: false, ready: true });
+    expect(res.body.database).toEqual({ configured: false, ready: true, persistence: 'in-memory' });
   });
 
   it('GET /api/openapi.json returns the spec', async () => {
@@ -74,6 +75,7 @@ describe('API', () => {
     expect(res.status).toBe(200);
     expect(res.body.openapi).toBe('3.2.1');
     expect(Object.keys(res.body.paths)).toContain('/api/diagram');
+    expect(Object.keys(res.body.paths)).toContain('/ready');
     expect(res.body.components.schemas.DiagramRequest).toBeDefined();
   });
 
@@ -322,6 +324,21 @@ describe('API', () => {
     expect(getRes.body.id).toBe(shareRes.body.id);
     expect(getRes.body.title).toBe('Architecture Overview');
     expect(getRes.body.mermaid).toBe('graph TD; A-->B;');
+  });
+
+  it('POST /api/diagrams/share accepts valid layout directions', async () => {
+    const app = createApp();
+
+    const shareRes = await request(app)
+      .post('/api/diagrams/share')
+      .send({
+        mermaid: 'graph LR; A-->B;',
+        diagramType: 'flowchart',
+        direction: 'LR',
+      });
+
+    expect(shareRes.status).toBe(200);
+    expect(shareRes.body.direction).toBe('LR');
   });
 
   it('POST /api/diagrams/share rejects missing Mermaid code', async () => {

@@ -22,6 +22,133 @@ export function isLlmConfigured(): boolean {
   return provider === 'ollama' || (provider === 'openai' && Boolean(process.env.OPENAI_API_KEY));
 }
 
+export interface LlmProviderHealth {
+  provider: 'openai' | 'ollama' | 'fallback';
+  configured: boolean;
+  ready: boolean;
+  cached: boolean;
+  latencyMs?: number;
+  error?: string;
+}
+
+let cachedHealth: { result: LlmProviderHealth; timestamp: number } | null = null;
+const HEALTH_CACHE_TTL_MS = 30_000;
+const PROBE_TIMEOUT_MS = 2_500;
+
+export function resetLlmHealthCache(): void {
+  cachedHealth = null;
+}
+
+export async function checkLlmProviderHealth(options?: { force?: boolean }): Promise<LlmProviderHealth> {
+  const provider = getLlmProvider();
+  const now = Date.now();
+
+  if (!options?.force && cachedHealth && now - cachedHealth.timestamp < HEALTH_CACHE_TTL_MS) {
+    return { ...cachedHealth.result, cached: true };
+  }
+
+  if (provider === 'fallback') {
+    const result: LlmProviderHealth = {
+      provider: 'fallback',
+      configured: false,
+      ready: true,
+      cached: false,
+    };
+    cachedHealth = { result, timestamp: now };
+    return result;
+  }
+
+  if (provider === 'openai') {
+    const apiKey = process.env.OPENAI_API_KEY?.trim();
+    if (!apiKey) {
+      const result: LlmProviderHealth = {
+        provider: 'openai',
+        configured: false,
+        ready: true,
+        cached: false,
+      };
+      cachedHealth = { result, timestamp: now };
+      return result;
+    }
+
+    const start = Date.now();
+    try {
+      const baseUrl = process.env.OPENAI_API_URL
+        ? new URL(process.env.OPENAI_API_URL).origin
+        : 'https://api.openai.com';
+      await axios.get(`${baseUrl}/v1/models`, {
+        headers: { Authorization: `Bearer ${apiKey}` },
+        timeout: PROBE_TIMEOUT_MS,
+      });
+      const latencyMs = Date.now() - start;
+      const result: LlmProviderHealth = {
+        provider: 'openai',
+        configured: true,
+        ready: true,
+        cached: false,
+        latencyMs,
+      };
+      cachedHealth = { result, timestamp: now };
+      return result;
+    } catch (err) {
+      const latencyMs = Date.now() - start;
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      log('warn', 'OpenAI provider probe failed', { error: errorMsg, latencyMs });
+      const result: LlmProviderHealth = {
+        provider: 'openai',
+        configured: true,
+        ready: false,
+        cached: false,
+        latencyMs,
+        error: errorMsg,
+      };
+      cachedHealth = { result, timestamp: now };
+      return result;
+    }
+  }
+
+  if (provider === 'ollama') {
+    const baseUrl = (process.env.OLLAMA_URL?.trim() || 'http://127.0.0.1:11434').replace(/\/+$/, '');
+    const start = Date.now();
+    try {
+      await axios.get(`${baseUrl}/api/version`, {
+        timeout: PROBE_TIMEOUT_MS,
+      });
+      const latencyMs = Date.now() - start;
+      const result: LlmProviderHealth = {
+        provider: 'ollama',
+        configured: true,
+        ready: true,
+        cached: false,
+        latencyMs,
+      };
+      cachedHealth = { result, timestamp: now };
+      return result;
+    } catch (err) {
+      const latencyMs = Date.now() - start;
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      log('warn', 'Ollama provider probe failed', { error: errorMsg, latencyMs });
+      const result: LlmProviderHealth = {
+        provider: 'ollama',
+        configured: true,
+        ready: false,
+        cached: false,
+        latencyMs,
+        error: errorMsg,
+      };
+      cachedHealth = { result, timestamp: now };
+      return result;
+    }
+  }
+
+  return {
+    provider: 'fallback',
+    configured: false,
+    ready: true,
+    cached: false,
+  };
+}
+
 async function requestLLM(messages: LLMMessage[], maxCompletionTokens = 1000): Promise<string> {
   const provider = getLlmProvider();
   const apiKey = process.env.OPENAI_API_KEY || '';

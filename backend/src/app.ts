@@ -3,13 +3,13 @@ import cors from 'cors';
 import helmet from 'helmet';
 import compression from 'compression';
 import { generateDiagram, refineDiagram, fixMermaid } from './diagram';
-import { describeDiagram, getLlmProvider, isLlmConfigured } from './llm';
+import { describeDiagram, getLlmProvider, isLlmConfigured, checkLlmProviderHealth } from './llm';
 import type { DiagramRequest } from '../../shared/types';
 import { openApiSpec } from './openapi';
 import * as metrics from './metrics';
 import { asyncHandler, errorHandler } from './middleware/errorHandler';
 import { requireApiSecret } from './middleware/auth';
-import { createLlmRateLimiter } from './middleware/rateLimit';
+import { createLlmRateLimiter, verifyUpstashConnection } from './middleware/rateLimit';
 import { requestLogger } from './middleware/requestLogger';
 import { requestId } from './middleware/requestId';
 import {
@@ -68,6 +68,8 @@ export function createApp() {
       ok: true,
       fallback,
       database: isDatabaseConfigured(),
+      persistence: isDatabaseConfigured() ? 'database' : 'in-memory',
+      llmProvider: getLlmProvider(),
       uptime: Math.floor(process.uptime()),
       memory: {
         rss: mem.rss,
@@ -79,12 +81,27 @@ export function createApp() {
   });
 
   app.get('/ready', asyncHandler(async (_req, res) => {
-    const database = await getDatabaseStatus();
-    res.status(database.configured && !database.ready ? 503 : 200).json({
-      ok: database.ready,
+    const [database, llm, rateLimiter] = await Promise.all([
+      getDatabaseStatus(),
+      checkLlmProviderHealth(),
+      verifyUpstashConnection(),
+    ]);
+    const ready =
+      (!database.configured || database.ready) &&
+      (!llm.configured || llm.ready) &&
+      (!rateLimiter.configured || rateLimiter.ready);
+    res.status(ready ? 200 : 503).json({
+      ok: ready,
       database,
+      llm,
+      rateLimiter,
     });
   }));
+
+  app.get('/metrics', (_req, res) => {
+    res.setHeader('Content-Type', 'text/plain; version=0.0.4; charset=utf-8');
+    res.send(metrics.getPrometheusMetrics());
+  });
 
   app.get('/api/openapi.json', (_req, res) => {
     res.setHeader('Content-Type', 'application/json');
@@ -116,8 +133,8 @@ export function createApp() {
 
   app.post(
     '/api/diagram',
-    llmRateLimit,
     apiAuth,
+    llmRateLimit,
     validateDiagramRequest,
     asyncHandler(async (req, res) => {
       const mermaid = await generateDiagram(req.body as DiagramRequest);
@@ -127,8 +144,8 @@ export function createApp() {
 
   app.post(
     '/api/refine',
-    llmRateLimit,
     apiAuth,
+    llmRateLimit,
     validateRefineRequest,
     asyncHandler(async (req, res) => {
       const { currentDiagram, instruction, diagramType } = req.body;
@@ -139,8 +156,8 @@ export function createApp() {
 
   app.post(
     '/api/fix',
-    llmRateLimit,
     apiAuth,
+    llmRateLimit,
     validateFixRequest,
     asyncHandler(async (req, res) => {
       const { mermaid, error } = req.body;
@@ -151,8 +168,8 @@ export function createApp() {
 
   app.post(
     '/api/describe',
-    llmRateLimit,
     apiAuth,
+    llmRateLimit,
     validateDescribeRequest,
     asyncHandler(async (req, res) => {
       const { mermaid } = req.body;
@@ -163,8 +180,8 @@ export function createApp() {
 
   app.post(
     '/api/diagrams/share',
-    llmRateLimit,
     apiAuth,
+    llmRateLimit,
     validateShareRequest,
     asyncHandler(async (req, res) => {
       const { mermaid, diagramType, title, direction, theme, sourceText } = req.body;

@@ -17,14 +17,23 @@ export const openApiSpec = {
           '200': { description: 'Service healthy', content: { 'application/json': { schema: { $ref: '#/components/schemas/Health' } } } },
         },
       },
-      '/ready': {
-        get: {
-          summary: 'Readiness probe',
-          description: 'Reports whether configured dependencies are reachable.',
-          responses: {
-            '200': { description: 'Service ready' },
-            '503': { description: 'Configured dependency unavailable' },
-          },
+    },
+    '/ready': {
+      get: {
+        summary: 'Readiness probe',
+        description: 'Reports whether configured dependencies (Neon Postgres, LLM provider, and Upstash Redis) are reachable.',
+        responses: {
+          '200': { description: 'Service ready' },
+          '503': { description: 'Configured dependency unavailable' },
+        },
+      },
+    },
+    '/metrics': {
+      get: {
+        summary: 'Prometheus metrics',
+        description: 'Exposes HTTP request and fallback metrics in Prometheus text exposition format.',
+        responses: {
+          '200': { description: 'Prometheus metrics text' },
         },
       },
     },

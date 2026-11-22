@@ -4,11 +4,16 @@ import { createApp } from './app';
 import { log } from './logger';
 import { initObservability } from './observability';
 import { getLlmProvider, isLlmConfigured } from './llm';
+import { validateStartupConfig } from './config';
+import { startPeriodicCleanup } from './cleanup';
 
 initObservability();
+validateStartupConfig();
 
 const app = createApp();
 const PORT = process.env.PORT || 4173;
+
+const cleanupJob = startPeriodicCleanup();
 
 const server = app.listen(PORT, () => {
   log('info', 'backend listening', { port: PORT, url: `http://localhost:${PORT}` });
@@ -27,6 +32,7 @@ const server = app.listen(PORT, () => {
 
 function shutdown(signal: string) {
   log('info', `${signal} received, shutting down gracefully`);
+  cleanupJob.stop();
   server.close(() => {
     log('info', 'server closed');
     process.exit(0);

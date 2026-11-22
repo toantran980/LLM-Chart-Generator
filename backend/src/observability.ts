@@ -17,12 +17,28 @@ export function initObservability(): void {
 }
 
 export function captureException(err: unknown, context?: Record<string, unknown>): void {
+  const errorMessage = err instanceof Error ? err.message : String(err);
   log('error', 'exception captured', {
-    error: err instanceof Error ? err.message : String(err),
+    error: errorMessage,
     ...context,
   });
 
-  if (sentryEnabled && err instanceof Error) {
-    Sentry.captureException(err, { extra: context });
+  if (sentryEnabled) {
+    Sentry.withScope((scope) => {
+      if (context) {
+        if (context.code) scope.setTag('error_code', String(context.code));
+        if (context.statusCode || context.status) {
+          scope.setTag('http_status', String(context.statusCode || context.status));
+        }
+        if (context.path) scope.setTag('route', String(context.path));
+        if (context.method) scope.setTag('method', String(context.method));
+        scope.setExtras(context);
+      }
+      if (err instanceof Error) {
+        Sentry.captureException(err);
+      } else {
+        Sentry.captureMessage(errorMessage, 'error');
+      }
+    });
   }
 }

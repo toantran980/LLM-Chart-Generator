@@ -9,7 +9,10 @@
   "scripts": {
     "dev": "npm-run-all --parallel backend:dev frontend:dev",
     "build": "npm run backend:build && npm run frontend:build",
+    "db:cleanup": "cd backend && npm run db:cleanup",
+    "db:migrate": "cd backend && npm run db:migrate",
     "test": "npm run backend:test && npm run frontend:test",
+    "test:smoke": "node scripts/smoke-test.mjs",
     "backend:dev": "cd backend && npm run dev",
     "backend:build": "cd backend && npm run build",
     "backend:test": "cd backend && npm test",

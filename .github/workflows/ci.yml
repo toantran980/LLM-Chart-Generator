@@ -9,23 +9,8 @@ on:
   pull_request:
 
 jobs:
-  backend-test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
-
-      - uses: actions/setup-node@v5
-        with:
-          node-version: 24
-          cache: npm
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Run backend tests
-        run: npm run backend:test
-
-  frontend-lint-build:
+  test:
+    name: Test & Build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -41,10 +26,10 @@ jobs:
       - name: Lint frontend
         run: npm run frontend:lint
 
-      - name: Run frontend tests
-        run: npm run frontend:test
+      - name: Run full test suite (backend & frontend)
+        run: npm test
 
-      - name: Build
+      - name: Build workspaces
         run: npm run build
 
   security:
@@ -75,13 +60,27 @@ jobs:
         uses: github/codeql-action/analyze@v4
 
   docker:
+    name: Build & Smoke-Test Containers
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [backend-test, frontend-lint-build, security]
+    needs: [test, security]
     steps:
       - uses: actions/checkout@v5
 
-      - name: Build Docker images
-        run: |
-          docker build -f backend/Dockerfile -t llm-chart-maker-backend .
-          docker build -f frontend/Dockerfile -t llm-chart-maker-frontend .
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+
+      - name: Build and launch containers
+        run: docker compose up -d --build
+
+      - name: Run container smoke tests
+        run: node scripts/smoke-test.mjs
+
+      - name: Dump container logs on failure
+        if: failure()
+        run: docker compose logs
+
+      - name: Teardown containers
+        if: always()
+        run: docker compose down -v
