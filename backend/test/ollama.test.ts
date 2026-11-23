@@ -90,7 +90,8 @@ describe('Ollama provider', () => {
 
     expect(res.status).toBe(200);
     expect(res.body.mermaid).toContain('sequenceDiagram');
-    expect(post.mock.calls[0][1].messages[1].content).toContain("You are not limited to this app's type picker");
+    const requestBody = post.mock.calls[0][1] as { messages: Array<{ content: string }> };
+    expect(requestBody.messages[1].content).toContain("You are not limited to this app's type picker");
   });
 
   it('rejects invalid provider configuration', () => {
