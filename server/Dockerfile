@@ -3,7 +3,7 @@ FROM node:24-alpine AS build
 
 WORKDIR /app
 
-# Install the backend workspace from the repository lockfile.
+# Install the server workspace from the repository lockfile.
 COPY package.json package-lock.json ./
 COPY server/package.json ./server/package.json
 COPY client/package.json ./client/package.json

@@ -17,7 +17,7 @@ should be addressed before promoting this project beyond a personal/public demo.
 - [X] `POST /api/diagrams/share` now uses the shared LLM request limiter.
 - [X] Mermaid, diagram type, title, source text, theme, and direction are validated.
 - [X] Add storage limits and retention/cleanup behavior (`cleanupOldDiagrams`, payload character limits, retention based on `last_accessed_at`).
-- [X] Add stronger abuse controls, quotas, or authentication beyond a public frontend key (`SERVER_API_KEY` Bearer auth, `DAILY_RATE_LIMIT_MAX` daily IP quotas, and `REQUIRE_PRIVATE_AUTH`).
+- [X] Add stronger abuse controls, quotas, or authentication beyond a public client key (`SERVER_API_KEY` Bearer auth, `DAILY_RATE_LIMIT_MAX` daily IP quotas, and `REQUIRE_PRIVATE_AUTH`).
 
 ### [Reliability] Share success does not guarantee database persistence
 
@@ -30,8 +30,8 @@ should be addressed before promoting this project beyond a personal/public demo.
 ### [Security] Browser API key is not a secret
 
 - [X] Reframe `VITE_APP_API_KEY` as an abuse deterrent, not authentication, in docs and `.env.example`.
-- [X] Keep `OPENAI_API_KEY` and database credentials backend-only.
-- [X] Anyone can extract `VITE_APP_API_KEY` from public frontend bundle to call protected backend endpoints (mitigated with daily IP quotas, server-side Bearer auth, and optional `REQUIRE_PRIVATE_AUTH`).
+- [X] Keep `OPENAI_API_KEY` and database credentials server-only.
+- [X] Anyone can extract `VITE_APP_API_KEY` from public client bundle to call protected server endpoints (mitigated with daily IP quotas, server-side Bearer auth, and optional `REQUIRE_PRIVATE_AUTH`).
 - [X] Implement real server-side identity or authorization if private API access is required (`SERVER_API_KEY` with Bearer token authorization and `REQUIRE_PRIVATE_AUTH` mode).
 
 ### [Cost] Public LLM usage needs stronger OpenAI cost controls (deprecated or later)
@@ -47,27 +47,27 @@ should be addressed before promoting this project beyond a personal/public demo.
 
 ### [Configuration] Canonicalize environment variable names
 
-- [X] `VITE_API_BASE` is the canonical frontend backend URL; `VITE_APP_API_KEY` remains an optional public abuse-deterrent key.
-- [X] Backend supports both `POSTGRES_URL` and `DATABASE_URL`.
+- [X] `VITE_API_BASE` is the canonical API URL used by the client; `VITE_APP_API_KEY` remains an optional public abuse-deterrent key.
+- [X] Server supports both `POSTGRES_URL` and `DATABASE_URL`.
 - [X] Docker Compose forwards both database variable names.
 - [X] Keep one canonical documented name for each setting (`POSTGRES_URL` canonical, `DATABASE_URL` alias).
 - [X] Add startup validation for conflicting or missing required configuration (`validateStartupConfig`).
 - [X] Add a versioned `.env.example` containing variable names only, never real values.
-- [X] Document build-time versus runtime frontend variables.
+- [X] Document build-time versus runtime client variables.
 
-### [CI] Frontend tests are missing from CI
+### [CI] Client tests are missing from CI
 
-- [X] Backend tests run in CI.
-- [X] Frontend lint and build run in CI.
-- [X] Frontend Vitest tests run in the CI workflow.
-- [X] Complete test suite (backend & frontend), linting, and workspace builds run in one unified required CI job (`test`).
+- [X] Server tests run in CI.
+- [X] Client lint and build run in CI.
+- [X] Client Vitest tests run in the CI workflow.
+- [X] Complete test suite (server & client), linting, and workspace builds run in one unified required CI job (`test`).
 
 ### [Docker] Production containers are not reproducible or fully checked
 
 - [X] Both Dockerfiles install workspace dependencies with `npm ci` and the root lockfile.
-- [X] CI builds both backend and frontend Docker images on pushes to main.
-- [X] Backend image and Compose probe `/ready`; frontend image and Compose probe the served page.
-- [X] Compose intentionally does not block the frontend on backend health so the UI remains available during API/database outages.
+- [X] CI builds both server and client Docker images on pushes to main.
+- [X] Server image and Compose probe `/ready`; client image and Compose probe the served page.
+- [X] Compose intentionally does not block the client on server health so the UI remains available during API/database outages.
 - [X] Build and smoke-test both containers together (`docker compose up --build` with `scripts/smoke-test.mjs` in CI).
 
 ### [Reliability] Health endpoint is not a readiness endpoint
@@ -106,8 +106,8 @@ should be addressed before promoting this project beyond a personal/public demo.
 ### [Infrastructure] No explicit deployment verification or rollback
 
 - [X] Add post-deploy smoke tests calling `/health`, `/ready`, generation, refinement, sharing, or retrieval (`scripts/smoke-test.mjs`).
-- [ ] Add deployment status gate confirming frontend and backend are compatible.
-- [ ] Add versioned frontend/backend release checks.
+- [ ] Add deployment status gate confirming client and server are compatible.
+- [ ] Add versioned client/server release checks.
 - [ ] Add rollback instructions or an automated rollback trigger.
 
 ### [Observability] Provider cost and latency are not fully measurable
@@ -119,17 +119,17 @@ should be addressed before promoting this project beyond a personal/public demo.
 ### [Security] Share and API routes need broader abuse controls
 
 - [X] Share routes have rate limiting.
-- [X] Reframe API key in frontend as abuse deterrent in documentation.
+- [X] Reframe API key in client as abuse deterrent in documentation.
 - [ ] CORS is allowlisted, but browser-only controls do not stop direct API requests.
 - [ ] Consider an edge WAF or bot protection.
 - [ ] Add request quotas by verified identity and IP where possible.
 
-### [Performance] Frontend bundle size needs optimization
+### [Performance] Client bundle size needs optimization
 
 - [ ] Main JavaScript bundle is approximately 1.38 MB before gzip (Mermaid and PDF contribute to initial load).
 - [ ] Lazy-load Mermaid diagram definitions and PDF viewer code.
 - [ ] Measure and split the largest bundles.
-- [ ] Add frontend performance budgets to CI.
+- [ ] Add client performance budgets to CI.
 
 ### [Documentation] README deployment instructions are incomplete or inconsistent
 
@@ -153,7 +153,7 @@ should be addressed before promoting this project beyond a personal/public demo.
 
 ## Verification Checklist
 
-- [X] CI runs backend tests, frontend tests, frontend lint, and production builds.
+- [X] CI runs server tests, client tests, client lint, and production builds.
 - [X] CI builds and smoke-tests both Docker containers together.
 - [ ] Deployment has automated push/deploy, smoke tests, and rollback.
 - [X] Environment variable names are consistent across code, Compose, CI, and docs.
