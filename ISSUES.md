@@ -141,7 +141,7 @@ should be addressed before promoting this project beyond a personal/public demo.
 
 ### [Reliability] No migrations or schema lifecycle
 
-- [X] Add versioned migrations before schema changes grow (`backend/src/migrate.ts`).
+- [X] Add versioned migrations before schema changes grow (`server/src/migrate.ts`).
 - [X] Run migrations during release, not lazily during requests (`npm run db:migrate`).
 
 ### [Reliability] No capacity or failure thresholds

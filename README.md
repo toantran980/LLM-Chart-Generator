@@ -1,4 +1,4 @@
-# LLM Chart Maker
+# LLM Chart Generator
 
 Turn plain text or PDF content into editable Mermaid diagrams. Generate with an LLM or the built-in local parser, refine diagrams with natural language, edit Mermaid source directly, and share diagrams with a link.
 

@@ -1,0 +1,139 @@
+import type { DiagramRequest, DiagramType } from '../../shared/types';
+
+const DEFAULT_DIRECTION = 'TD';
+
+function escapeForMermaid(s: string) {
+  return s.replace(/"/g, '#quot;').replace(/\n/g, ' ');
+}
+
+export function fallbackDiagram(req: DiagramRequest & { direction?: string }): string {
+  const { text, diagramType, direction, instruction } = req;
+  let dir = direction || DEFAULT_DIRECTION;
+  if (dir === 'auto') {
+    dir = 'LR'; // 'auto' is not valid Mermaid syntax; default to 'LR'
+  }
+  let styleDirectives = '';
+
+  if (instruction) {
+    const lower = instruction.toLowerCase();
+    if (/(left to right|horizontal|lr)/.test(lower)) dir = 'LR';
+    else if (/(right to left|rl)/.test(lower)) dir = 'RL';
+    else if (/(bottom to top|bt|vertical)/.test(lower)) dir = 'BT';
+    else if (/(top to bottom|td)/.test(lower)) dir = 'TD';
+    if (/dark/.test(lower)) styleDirectives += '%%{init: {"theme": "dark"}}%%\n';
+    if (/monochrome/.test(lower)) styleDirectives += '%%{init: {"themeVariables": {"primaryColor": "#222", "edgeLabelBackground":"#fff"}}}%%\n';
+  }
+
+  const lines = text
+    .split(/\r?\n/)
+    .map(s => s.trim())
+    .filter(Boolean)
+    .flatMap(l => l.split(/(?<=\.)\s+/));
+
+  if (diagramType === 'timeline') {
+    let body = '```mermaid\n' + styleDirectives + 'sequenceDiagram\n';
+    let prevId: string | null = null;
+    lines.forEach((line, idx) => {
+      const id = `E${idx + 1}`;
+      const label = escapeForMermaid(line);
+      body += `participant ${id}\n`;
+      if (prevId) body += `${prevId}->>${id}: ${label}\n`;
+      prevId = id;
+    });
+    body += '```';
+    return body;
+  }
+
+  if (diagramType === 'rules') {
+    const nodes: string[] = [];
+    const links: string[] = [];
+    let nodeId = 1;
+    let lastId: string | null = null;
+
+    lines.forEach((line) => {
+      const m = line.match(/^if\s+(.{1,200}?),\s*(then\s*)?(.{1,200}?)(?:,\s*else\s*(.{1,200}?))?\.?$/i);
+      if (m) {
+        const cond = m[1].trim();
+        const thenPart = m[3].trim();
+        const elsePart = m[4]?.trim();
+        const condId = `N${nodeId++}`;
+        const thenId = `N${nodeId++}`;
+        nodes.push(`${condId}{${escapeForMermaid(cond)}}`);
+        nodes.push(`${thenId}[${escapeForMermaid(thenPart)}]`);
+        links.push(`${condId} -- Yes --> ${thenId}`);
+        if (elsePart) {
+          const elseId = `N${nodeId++}`;
+          nodes.push(`${elseId}[${escapeForMermaid(elsePart)}]`);
+          links.push(`${condId} -- No --> ${elseId}`);
+        }
+        if (lastId) links.push(`${lastId} --> ${condId}`);
+        lastId = condId;
+      } else {
+        const id = `N${nodeId++}`;
+        nodes.push(`${id}[${escapeForMermaid(line)}]`);
+        if (lastId) links.push(`${lastId} --> ${id}`);
+        lastId = id;
+      }
+    });
+
+    return `\`\`\`mermaid\n${styleDirectives}flowchart ${dir}\n${nodes.join('\n')}\n${links.join('\n')}\n\`\`\``;
+  }
+
+  const nodes: string[] = [];
+  const links: string[] = [];
+  const limitedLines = lines.slice(0, 5);
+
+  limitedLines.forEach((line, i) => {
+    const id = `A${i + 1}`;
+    const cleanLabel = escapeForMermaid(line).replace(/[\[\]\(\)\{\}]/g, '');
+    nodes.push(`${id}["${cleanLabel}"]`);
+    if (i > 0) links.push(`A${i} --> ${id}`);
+  });
+
+  return `\`\`\`mermaid\n${styleDirectives}flowchart ${dir}\n${nodes.join('\n')}\n${links.join('\n')}\n\`\`\``;
+}
+
+export function fallbackSelectDiagramType(text: string): DiagramType {
+  const lower = text.toLowerCase();
+
+  // Gantt chart: project schedules, tasks, duration, sprints, milestones
+  if (/(gantt|sprint|milestone|deadline|duration|\bweeks?\b|\bdays?\b|schedule|task\s*\d)/i.test(lower) && /(start|end|finish|phase|quarter)/i.test(lower)) {
+    return 'gantt';
+  }
+
+  // Timeline: chronological dates, history, years, historical milestones
+  if (/(timeline|chronolog|century|history|evolution|\b\d{4}\b\s*[:\-–]|\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]* \d{4}\b)/i.test(lower)) {
+    return 'timeline';
+  }
+
+  // ER Diagram: database entities, relations, primary/foreign keys, attributes
+  const erKeywords = /\b(entity|table|foreign key|primary key|one-to-many|many-to-many|database schema|relational|attributes?)\b/i;
+  const erSyntax = /[a-z0-9_]{1,50}\s*\|{1,2}--o\{|[a-z0-9_]{1,50}\s*\}\|/i;
+  if (erKeywords.test(lower) || erSyntax.test(lower)) {
+    return 'er';
+  }
+
+  // Git Graph: git branch, commit, merge, checkout, rebase, tag
+  const gitKeywords = /\b(git\s*graph|git\s*branch|commit\s*id|pull request|rebase|cherry-pick|fast-forward)\b/i;
+  const gitActions = /\b(commit|branch|merge|checkout)\b/i;
+  const gitBranches = /\b(main|master|feature|develop|hotfix)\b/i;
+  if (gitKeywords.test(lower) || (gitActions.test(lower) && gitBranches.test(lower))) {
+    return 'gitgraph';
+  }
+
+  // Rules / Decision: if/then/else, policies, business rules
+  const ruleKeywords = /\b(rule\s*\d|business rule|eligibility criteria|conditional logic)\b/i;
+  const ifThenElse = /if\s+[^,\n]{1,100},\s*(then|else)\b/i;
+  if (ruleKeywords.test(lower) || ifThenElse.test(lower) || (lower.includes('if ') && lower.includes(' then '))) {
+    return 'rules';
+  }
+
+  // Mindmap: brainstorm, concepts, core topic, subtopics, hierarchical ideas
+  if (/(mindmap|brainstorm|central concept|core theme|subtopic|sub-categories|idea tree)/i.test(lower)) {
+    return 'mindmap';
+  }
+
+  // Default: Flowchart
+  return 'flowchart';
+}
+

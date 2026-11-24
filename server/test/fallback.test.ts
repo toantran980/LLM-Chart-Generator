@@ -1,0 +1,105 @@
+import { describe, expect, it } from 'vitest';
+import { fallbackDiagram, fallbackSelectDiagramType } from '../src/fallback';
+
+
+describe('fallbackDiagram', () => {
+  it('builds a flowchart with edges from sequential lines', () => {
+    const result = fallbackDiagram({
+      text: 'Start\nDo step 1\nDo step 2',
+      diagramType: 'flowchart',
+    });
+
+    expect(result).toMatch(/flowchart TD/);
+    expect(result).toMatch(/-->/);
+    expect(result).toMatch(/```mermaid/);
+  });
+
+  it('limits flowchart nodes to five lines', () => {
+    const lines = Array.from({ length: 8 }, (_, i) => `Step ${i + 1}`).join('\n');
+    const result = fallbackDiagram({ text: lines, diagramType: 'flowchart' });
+
+    expect(result.match(/^A\d+\[/gm)?.length).toBe(5);
+  });
+
+  it('builds a timeline as a sequence diagram', () => {
+    const result = fallbackDiagram({
+      text: 'Kickoff\nDesign\nLaunch',
+      diagramType: 'timeline',
+    });
+
+    expect(result).toMatch(/sequenceDiagram/);
+    expect(result).toMatch(/->>/);
+  });
+
+  it('parses if/then rules into decision nodes', () => {
+    const result = fallbackDiagram({
+      text: 'if user is admin, then grant access, else deny access.',
+      diagramType: 'rules',
+    });
+
+    expect(result).toMatch(/flowchart TD/);
+    expect(result).toMatch(/Yes -->/);
+    expect(result).toMatch(/No -->/);
+  });
+
+  it('applies direction from instruction', () => {
+    const result = fallbackDiagram({
+      text: 'A\nB',
+      diagramType: 'flowchart',
+      instruction: 'draw left to right',
+    });
+
+    expect(result).toMatch(/flowchart LR/);
+  });
+
+  it('preserves the full sentence in fallback flowchart labels', () => {
+    const result = fallbackDiagram({
+      text: 'This sentence should stay intact in the diagram label.',
+      diagramType: 'flowchart',
+    });
+
+    expect(result).toContain('This sentence should stay intact in the diagram label.');
+    expect(result).not.toContain('...');
+  });
+
+  it('escapes double quotes in labels', () => {
+    const result = fallbackDiagram({
+      text: 'Say "hello"',
+      diagramType: 'flowchart',
+    });
+
+    expect(result).toContain('#quot;');
+    expect(result).not.toMatch(/Say "hello"/);
+  });
+});
+
+describe('fallbackSelectDiagramType', () => {
+  it('selects gantt for schedule and sprint tasks', () => {
+    expect(fallbackSelectDiagramType('Sprint 1 schedule: Task 1 from start to finish over 2 weeks in Q1 phase')).toBe('gantt');
+  });
+
+  it('selects timeline for historical milestones', () => {
+    expect(fallbackSelectDiagramType('1990: Invention of Web\n2000: Dot com era\n2020: AI era timeline')).toBe('timeline');
+  });
+
+  it('selects er for database tables and relations', () => {
+    expect(fallbackSelectDiagramType('Database schema with User table, Order entity, primary key id, and one-to-many relation')).toBe('er');
+  });
+
+  it('selects gitgraph for branching and merge workflows', () => {
+    expect(fallbackSelectDiagramType('Git branch develop, commit fix, merge into main')).toBe('gitgraph');
+  });
+
+  it('selects rules for conditional statements', () => {
+    expect(fallbackSelectDiagramType('if user has permission, then show dashboard, else redirect to login')).toBe('rules');
+  });
+
+  it('selects mindmap for brainstorming and central themes', () => {
+    expect(fallbackSelectDiagramType('Mindmap brainstorming on product ideas with central concept and subtopics')).toBe('mindmap');
+  });
+
+  it('defaults to flowchart for generic steps', () => {
+    expect(fallbackSelectDiagramType('Step 1: Open app\nStep 2: Click button\nStep 3: Done')).toBe('flowchart');
+  });
+});
+

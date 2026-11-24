@@ -1,13 +1,13 @@
 # Architecture
 
-LLM Chart Maker is an npm workspace with a browser frontend, an Express API, and shared TypeScript types.
+LLM Chart Generator is an npm workspace with a browser frontend, an Express API, and shared TypeScript types.
 
 ## Components
 
 | Component | Role |
 | --- | --- |
-| `frontend/` | React and Vite single-page app, Mermaid rendering, PDF text extraction, local history |
-| `backend/` | Express API for diagram generation, refinement, repair, descriptions, sharing, health, and metrics |
+| `client/` | React and Vite single-page app, Mermaid rendering, PDF text extraction, local history |
+| `server/` | Express API for diagram generation, refinement, repair, descriptions, sharing, health, and metrics |
 | `shared/` | Types shared by the frontend and backend |
 | Neon Postgres | Persistent shared diagrams when `POSTGRES_URL` or `DATABASE_URL` is configured |
 | Upstash Redis | Shared rate-limit counters and optional durable counters when REST credentials are configured |
@@ -33,9 +33,9 @@ In local development, Vite serves the frontend on port `5173` and proxies API re
 ## Repository layout
 
 ```text
-backend/       Express API, middleware, database access, and backend tests
+server/        Express API, middleware, database access, and backend tests
 docs/          Development, deployment, API, and architecture guides
-frontend/      React application, Vite configuration, and frontend tests
+client/        React application, Vite configuration, and frontend tests
 scripts/       Smoke-test utilities
 shared/        Shared TypeScript types
 docker-compose.yml

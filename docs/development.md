@@ -40,9 +40,9 @@ OLLAMA_MODEL=qwen3:8b
 | `npm run dev` | Run frontend and backend together |
 | `npm run build` | Build both workspaces |
 | `npm test` | Run backend and frontend tests |
-| `npm run frontend:lint` | Lint the frontend |
-| `npm run backend:dev` | Run only the backend |
-| `npm run frontend:dev` | Run only the frontend |
+| `npm run client:lint` | Lint the frontend |
+| `npm run server:dev` | Run only the backend |
+| `npm run client:dev` | Run only the frontend |
 | `npm run db:migrate` | Apply database migrations |
 | `npm run db:cleanup` | Run diagram retention cleanup manually |
 | `npm run test:smoke` | Run the HTTP smoke-test script against configured URLs |
