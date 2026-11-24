@@ -9,6 +9,7 @@ The backend serves an OpenAPI document at `/api/openapi.json` and Swagger UI at 
 | `GET /health` | Liveness, provider mode, process uptime, and process-local metrics |
 | `GET /ready` | Readiness of configured database, LLM provider, and Upstash connection |
 | `GET /metrics` | Process-local Prometheus text metrics |
+| `GET /metrics/providers` | Provider latency, error, token, request-budget, and configured cost-estimate aggregates; shared through Upstash when configured |
 | `POST /api/diagram` | Generate Mermaid from text and a requested diagram type |
 | `POST /api/refine` | Refine Mermaid with an instruction |
 | `POST /api/fix` | Repair Mermaid after a rendering error |

@@ -5,6 +5,9 @@ import { ApiError } from '../errors';
 import {
   DEFAULT_DAILY_RATE_LIMIT_MAX,
   DEFAULT_DAILY_RATE_LIMIT_WINDOW_MS,
+  DEFAULT_GLOBAL_DAILY_RATE_LIMIT_MAX,
+  DEFAULT_AUTH_DAILY_RATE_LIMIT_MAX,
+  DEFAULT_AUTH_RATE_LIMIT_MAX,
   DEFAULT_RATE_LIMIT_MAX,
   DEFAULT_RATE_LIMIT_WINDOW_MS,
 } from '../limits';
@@ -62,7 +65,7 @@ export function getRateLimitKey(req: Request): string {
   return `ip:${ip}`;
 }
 
-function isBypassed(req: Request): boolean {
+function isBearerAuthenticated(req: Request): boolean {
   return req.auth?.type === 'bearer';
 }
 
@@ -70,7 +73,11 @@ function createUpstashLimiters(
   max: number,
   windowMs: number,
   dailyMax: number,
-): { minute: Ratelimit; daily: Ratelimit } | null {
+  authMax: number,
+  authWindowMs: number,
+  authDailyMax: number,
+  globalDailyMax: number,
+): { minute: Ratelimit; daily: Ratelimit; authMinute: Ratelimit; authDaily: Ratelimit; globalDaily: Ratelimit } | null {
   const url = process.env.UPSTASH_REDIS_REST_URL?.trim();
   const token = process.env.UPSTASH_REDIS_REST_TOKEN?.trim();
   if (!url || !token) return null;
@@ -87,7 +94,22 @@ function createUpstashLimiters(
     limiter: Ratelimit.slidingWindow(dailyMax, '24 h'),
     prefix: 'llm-chart-maker-daily',
   });
-  return { minute, daily };
+  const authMinute = new Ratelimit({
+    redis,
+    limiter: Ratelimit.slidingWindow(authMax, `${Math.max(1, Math.ceil(authWindowMs / 1000))} s`),
+    prefix: 'llm-chart-generator-auth',
+  });
+  const authDaily = new Ratelimit({
+    redis,
+    limiter: Ratelimit.slidingWindow(authDailyMax, '24 h'),
+    prefix: 'llm-chart-generator-auth-daily',
+  });
+  const globalDaily = new Ratelimit({
+    redis,
+    limiter: Ratelimit.slidingWindow(globalDailyMax, '24 h'),
+    prefix: 'llm-chart-generator-global-daily',
+  });
+  return { minute, daily, authMinute, authDaily, globalDaily };
 }
 
 export async function verifyUpstashConnection(): Promise<RateLimiterStatus> {
@@ -138,28 +160,27 @@ function applyInMemoryLimit(
   dailyMax: number,
   dailyWindowMs: number,
 ): void {
-  if (isBypassed(req)) {
+  if (isBearerAuthenticated(req)) {
     return next();
   }
 
-  pruneExpiredEntries();
-
   const key = getRateLimitKey(req);
+  const error = consumeInMemoryKey(key, res, max, windowMs, dailyMax, dailyWindowMs);
+  if (error) return next(error);
+  next();
+}
+
+function consumeInMemoryKey(
+  key: string,
+  res: import('express').Response,
+  max: number,
+  windowMs: number,
+  dailyMax: number,
+  dailyWindowMs: number,
+): ApiError | null {
+  const dailyError = consumeInMemoryDailyKey(key, res, dailyMax, dailyWindowMs);
+  if (dailyError) return dailyError;
   const now = Date.now();
-
-  // 1. Enforce Daily Quota per IP/Identity
-  let dailyEntry = dailyHits.get(key);
-  if (!dailyEntry || now >= dailyEntry.resetAt) {
-    dailyEntry = { count: 0, resetAt: now + dailyWindowMs };
-    dailyHits.set(key, dailyEntry);
-  }
-
-  dailyEntry.count += 1;
-  if (dailyEntry.count > dailyMax) {
-    const retrySec = Math.max(1, Math.ceil((dailyEntry.resetAt - now) / 1000));
-    res.setHeader('Retry-After', retrySec);
-    return next(dailyQuotaExceededError(dailyEntry.resetAt, dailyMax));
-  }
 
   // 2. Enforce Sliding Window Limit
   let entry = hits.get(key);
@@ -179,9 +200,47 @@ function applyInMemoryLimit(
   if (entry.count > max) {
     const retrySec = Math.max(1, Math.ceil((entry.resetAt - now) / 1000));
     res.setHeader('Retry-After', retrySec);
-    return next(rateLimitExceededError(entry.resetAt));
+    return rateLimitExceededError(entry.resetAt);
   }
+  return null;
+}
 
+function consumeInMemoryDailyKey(
+  key: string,
+  res: import('express').Response,
+  dailyMax: number,
+  dailyWindowMs: number,
+): ApiError | null {
+  pruneExpiredEntries();
+  const now = Date.now();
+  let dailyEntry = dailyHits.get(key);
+  if (!dailyEntry || now >= dailyEntry.resetAt) {
+    dailyEntry = { count: 0, resetAt: now + dailyWindowMs };
+    dailyHits.set(key, dailyEntry);
+  }
+  dailyEntry.count += 1;
+  if (dailyEntry.count > dailyMax) {
+    res.setHeader('Retry-After', Math.max(1, Math.ceil((dailyEntry.resetAt - now) / 1000)));
+    return dailyQuotaExceededError(dailyEntry.resetAt, dailyMax);
+  }
+  return null;
+}
+
+function applyInMemoryAuthLimit(
+  req: Request,
+  res: import('express').Response,
+  next: import('express').NextFunction,
+  max: number,
+  windowMs: number,
+  dailyMax: number,
+  dailyWindowMs: number,
+): void {
+  const identity = getRateLimitKey(req);
+  const ip = `ip:${req.ip || req.socket.remoteAddress || 'unknown'}`;
+  const identityError = consumeInMemoryKey(`auth:${identity}`, res, max, windowMs, dailyMax, dailyWindowMs);
+  if (identityError) return next(identityError);
+  const ipError = consumeInMemoryKey(`auth:${ip}`, res, max, windowMs, dailyMax, dailyWindowMs);
+  if (ipError) return next(ipError);
   next();
 }
 
@@ -190,15 +249,75 @@ export function createLlmRateLimiter(): RequestHandler {
   const max = parseEnvInt('RATE_LIMIT_MAX', DEFAULT_RATE_LIMIT_MAX);
   const dailyMax = parseEnvInt('DAILY_RATE_LIMIT_MAX', DEFAULT_DAILY_RATE_LIMIT_MAX);
   const dailyWindowMs = parseEnvInt('DAILY_RATE_LIMIT_WINDOW_MS', DEFAULT_DAILY_RATE_LIMIT_WINDOW_MS);
+  const authMax = parseEnvInt('AUTH_RATE_LIMIT_MAX', DEFAULT_AUTH_RATE_LIMIT_MAX);
+  const authWindowMs = parseEnvInt('AUTH_RATE_LIMIT_WINDOW_MS', DEFAULT_RATE_LIMIT_WINDOW_MS);
+  const authDailyMax = parseEnvInt('AUTH_DAILY_RATE_LIMIT_MAX', DEFAULT_AUTH_DAILY_RATE_LIMIT_MAX);
+  const globalDailyMax = parseEnvInt('GLOBAL_DAILY_RATE_LIMIT_MAX', DEFAULT_GLOBAL_DAILY_RATE_LIMIT_MAX);
 
-  const limiters = createUpstashLimiters(max, windowMs, dailyMax);
+  const limiters = createUpstashLimiters(max, windowMs, dailyMax, authMax, authWindowMs, authDailyMax, globalDailyMax);
+
+  const applyInMemoryGlobalDailyLimit = (res: import('express').Response, next: import('express').NextFunction): boolean => {
+    const error = consumeInMemoryDailyKey('global:all', res, globalDailyMax, dailyWindowMs);
+    if (!error) return false;
+    next(error);
+    return true;
+  };
+
+  const applyAuthenticatedInMemoryLimit = (req: Request, res: import('express').Response, next: import('express').NextFunction) => {
+    if (applyInMemoryGlobalDailyLimit(res, next)) return;
+    applyInMemoryAuthLimit(req, res, next, authMax, authWindowMs, authDailyMax, dailyWindowMs);
+  };
+  const applyAuthenticatedInMemoryBuckets = (req: Request, res: import('express').Response, next: import('express').NextFunction) =>
+    applyInMemoryAuthLimit(req, res, next, authMax, authWindowMs, authDailyMax, dailyWindowMs);
+  const applyPublicInMemoryLimit = (req: Request, res: import('express').Response, next: import('express').NextFunction) => {
+    if (applyInMemoryGlobalDailyLimit(res, next)) return;
+    applyInMemoryLimit(req, res, next, max, windowMs, dailyMax, dailyWindowMs);
+  };
 
   if (limiters) {
     log('info', 'rate limiting via Upstash Redis', { max, windowMs, dailyMax });
 
     return async (req, res, next) => {
-      if (isBypassed(req)) {
-        return next();
+      try {
+        const globalResult = await limiters.globalDaily.limit('all');
+        if (!globalResult.success) {
+          res.setHeader('Retry-After', Math.max(1, Math.ceil((globalResult.reset - Date.now()) / 1000)));
+          return next(dailyQuotaExceededError(globalResult.reset, globalDailyMax));
+        }
+      } catch (err) {
+        log('warn', 'Upstash global daily limiter unavailable; falling back to in-memory limiting', {
+          error: err instanceof Error ? err.message : String(err),
+        });
+        return isBearerAuthenticated(req)
+          ? applyAuthenticatedInMemoryLimit(req, res, next)
+          : applyPublicInMemoryLimit(req, res, next);
+      }
+
+      if (isBearerAuthenticated(req)) {
+        try {
+          const keys = [
+            getRateLimitKey(req),
+            `ip:${req.ip || req.socket.remoteAddress || 'unknown'}`,
+          ];
+          for (const key of keys) {
+            const dailyResult = await limiters.authDaily.limit(key);
+            if (!dailyResult.success) {
+              res.setHeader('Retry-After', Math.max(1, Math.ceil((dailyResult.reset - Date.now()) / 1000)));
+              return next(dailyQuotaExceededError(dailyResult.reset, authDailyMax));
+            }
+            const minuteResult = await limiters.authMinute.limit(key);
+            if (!minuteResult.success) {
+              res.setHeader('Retry-After', Math.max(1, Math.ceil((minuteResult.reset - Date.now()) / 1000)));
+              return next(rateLimitExceededError(minuteResult.reset));
+            }
+          }
+          return next();
+        } catch (err) {
+          log('warn', 'Upstash authenticated rate limiter unavailable; falling back to in-memory limiting', {
+            error: err instanceof Error ? err.message : String(err),
+          });
+          return applyAuthenticatedInMemoryBuckets(req, res, next);
+        }
       }
 
       try {
@@ -232,10 +351,11 @@ export function createLlmRateLimiter(): RequestHandler {
     };
   }
 
-  log('info', 'rate limiting via in-memory store', { max, windowMs, dailyMax });
+  log('info', 'rate limiting via in-memory store', { max, windowMs, dailyMax, authMax, authWindowMs, authDailyMax, globalDailyMax });
 
   return (req, res, next) => {
-    applyInMemoryLimit(req, res, next, max, windowMs, dailyMax, dailyWindowMs);
+    if (isBearerAuthenticated(req)) return applyAuthenticatedInMemoryLimit(req, res, next);
+    applyPublicInMemoryLimit(req, res, next);
   };
 }
 

@@ -37,6 +37,15 @@ export const openApiSpec = {
         },
       },
     },
+    '/metrics/providers': {
+      get: {
+        summary: 'LLM provider usage metrics',
+        description: 'Reports provider latency, errors, token usage, requested completion limits, and configured OpenAI cost estimates. Uses shared Upstash aggregates when available.',
+        responses: {
+          '200': { description: 'Provider metric aggregates' },
+        },
+      },
+    },
     '/api/diagram': {
       post: {
         summary: 'Generate a diagram',

@@ -3,13 +3,22 @@ import type { DiagramRequest, DiagramTypeOption } from '../../shared/types';
 import { ApiError } from './errors';
 import { DEFAULT_LLM_TIMEOUT_MS } from './limits';
 import { log } from './logger';
+import { recordProviderRequest } from './metrics';
 
 // Sentinel value meaning "let the LLM decide"
 const AUTO = 'auto';
 
 type LLMMessage = { role: 'system' | 'user'; content: string };
-interface OpenAIResponse { choices?: { message?: { content?: string } }[]; }
-interface OllamaResponse { message?: { content?: string }; }
+type LlmOperation = 'generate' | 'refine' | 'fix' | 'describe';
+interface OpenAIResponse {
+  choices?: { message?: { content?: string } }[];
+  usage?: { prompt_tokens?: number; completion_tokens?: number };
+}
+interface OllamaResponse {
+  message?: { content?: string };
+  prompt_eval_count?: number;
+  eval_count?: number;
+}
 
 export function getLlmProvider(): 'openai' | 'ollama' | 'fallback' {
   const provider = process.env.LLM_PROVIDER?.trim() || 'openai';
@@ -149,25 +158,63 @@ export async function checkLlmProviderHealth(options?: { force?: boolean }): Pro
   };
 }
 
-async function requestLLM(messages: LLMMessage[], maxCompletionTokens = 1000): Promise<string> {
+function estimatePromptTokens(messages: LLMMessage[]): number {
+  const characters = messages.reduce((total, message) => total + message.content.length, 0);
+  return Math.max(1, Math.ceil(characters / 4));
+}
+
+function getOpenAICostEstimate(promptTokens: number, completionTokens: number): number | null {
+  const inputRate = Number(process.env.OPENAI_INPUT_USD_PER_1M_TOKENS);
+  const outputRate = Number(process.env.OPENAI_OUTPUT_USD_PER_1M_TOKENS);
+  if (!Number.isFinite(inputRate) || inputRate < 0 || !Number.isFinite(outputRate) || outputRate < 0) return null;
+  if (!process.env.OPENAI_INPUT_USD_PER_1M_TOKENS || !process.env.OPENAI_OUTPUT_USD_PER_1M_TOKENS) return null;
+  return (promptTokens * inputRate + completionTokens * outputRate) / 1_000_000;
+}
+
+async function requestLLM(messages: LLMMessage[], maxCompletionTokens = 1000, operation: LlmOperation = 'generate'): Promise<string> {
   const provider = getLlmProvider();
-  const apiKey = process.env.OPENAI_API_KEY || '';
   if (provider === 'fallback') {
     throw new ApiError('This feature requires an LLM. Configure LLM_PROVIDER as openai or ollama.', 503, 'LLM_ERROR');
   }
-  if (provider === 'openai' && !apiKey) {
-    throw new ApiError(
-      'OpenAI API key is missing. Please set OPENAI_API_KEY in your .env file.',
-      503,
-      'LLM_ERROR',
-    );
-  }
+
+  const startedAt = Date.now();
+  const estimatedPrompt = estimatePromptTokens(messages);
+  let promptTokens: number | undefined;
+  let completionTokens: number | undefined;
+  let requestStarted = false;
+  const record = (errorCode?: string) => {
+    const countedPromptTokens = promptTokens ?? estimatedPrompt;
+    const cost = provider === 'openai' && requestStarted
+      ? getOpenAICostEstimate(countedPromptTokens, completionTokens ?? maxCompletionTokens)
+      : null;
+    recordProviderRequest({
+      provider,
+      operation,
+      durationMs: Date.now() - startedAt,
+      promptTokens: countedPromptTokens,
+      promptTokensEstimated: promptTokens === undefined,
+      completionTokens,
+      requestedCompletionTokens: maxCompletionTokens,
+      estimatedCostUsd: cost,
+      errorCode,
+    });
+  };
 
   try {
+    const apiKey = process.env.OPENAI_API_KEY || '';
+    if (provider === 'openai' && !apiKey) {
+      throw new ApiError(
+        'OpenAI API key is missing. Please set OPENAI_API_KEY in your .env file.',
+        503,
+        'LLM_ERROR',
+      );
+    }
+
     const timeout = Number.parseInt(process.env.LLM_TIMEOUT_MS || '', 10) || DEFAULT_LLM_TIMEOUT_MS;
     let content: string | undefined;
     if (provider === 'ollama') {
       const baseUrl = (process.env.OLLAMA_URL?.trim() || 'http://127.0.0.1:11434').replace(/\/+$/, '');
+      requestStarted = true;
       const response = await axios.post<OllamaResponse>(`${baseUrl}/api/chat`, {
         model: process.env.OLLAMA_MODEL?.trim() || 'qwen3:8b',
         messages,
@@ -176,7 +223,10 @@ async function requestLLM(messages: LLMMessage[], maxCompletionTokens = 1000): P
         options: { temperature: 0.1, num_predict: maxCompletionTokens },
       }, { timeout });
       content = response.data?.message?.content;
+      promptTokens = response.data?.prompt_eval_count;
+      completionTokens = response.data?.eval_count;
     } else {
+      requestStarted = true;
       const response = await axios.post<OpenAIResponse>(process.env.OPENAI_API_URL || 'https://api.openai.com/v1/chat/completions', {
         model: 'gpt-5.4-mini',
         messages,
@@ -187,32 +237,36 @@ async function requestLLM(messages: LLMMessage[], maxCompletionTokens = 1000): P
         timeout,
       });
       content = response.data?.choices?.[0]?.message?.content;
+      promptTokens = response.data?.usage?.prompt_tokens;
+      completionTokens = response.data?.usage?.completion_tokens;
     }
     if (!content) {
       throw new ApiError('Empty response from LLM', 502, 'LLM_ERROR');
     }
+    record();
     return content.trim();
   } catch (err) {
-    if (err instanceof ApiError) throw err;
+    let normalizedError: unknown = err;
+    if (!(err instanceof ApiError)) {
+      // Check for axios error structure without relying on axios.isAxiosError
+      const error = err as any;
+      const isAxiosError = error &&
+        (error.config !== undefined ||
+         error.response !== undefined ||
+         error.request !== undefined);
 
-    // Check for axios error structure without relying on axios.isAxiosError
-    const error = err as any;
-    const isAxiosError = error &&
-      (error.config !== undefined ||
-       error.response !== undefined ||
-       error.request !== undefined);
-
-    if (isAxiosError) {
-      if (error.code === 'ECONNABORTED') {
-        throw new ApiError('LLM request timed out', 504, 'LLM_TIMEOUT');
+      if (isAxiosError && error.code === 'ECONNABORTED') {
+        normalizedError = new ApiError('LLM request timed out', 504, 'LLM_TIMEOUT');
+      } else if (isAxiosError) {
+        const providerMessage = error.response?.data?.error?.message;
+        const message = typeof providerMessage === 'string' ? providerMessage : (error.message || 'Unknown axios error');
+        const status = error.response?.status && error.response.status >= 400 ? error.response.status : 502;
+        normalizedError = new ApiError(message, status, 'LLM_ERROR');
       }
-      const providerMessage = error.response?.data?.error?.message;
-      const message = typeof providerMessage === 'string' ? providerMessage : (error.message || 'Unknown axios error');
-      const status = error.response?.status && error.response.status >= 400 ? error.response.status : 502;
-      throw new ApiError(message, status, 'LLM_ERROR');
     }
 
-    throw err;
+    record(normalizedError instanceof ApiError ? normalizedError.code : 'LLM_ERROR');
+    throw normalizedError;
   }
 }
 
@@ -289,21 +343,21 @@ export async function generateDiagramWithLLM(req: DiagramRequest): Promise<strin
   return requestLLM([
     { role: 'system', content: 'You are a precise Mermaid diagram generator. You only output valid Mermaid code within markdown blocks.' },
     { role: 'user', content: buildPrompt(req) },
-  ]);
+  ], 1000, 'generate');
 }
 
 export async function refineDiagramWithLLM(req: { currentDiagram: string; instruction: string; diagramType: DiagramTypeOption }): Promise<string> {
   return requestLLM([
     { role: 'system', content: 'You are a precise Mermaid diagram editor. You only output valid Mermaid code within markdown blocks.' },
     { role: 'user', content: buildRefinePrompt(req) },
-  ]);
+  ], 1000, 'refine');
 }
 
 export async function fixMermaidWithLLM(req: { mermaid: string; error: string }): Promise<string> {
   return requestLLM([
     { role: 'system', content: 'You are a Mermaid syntax fixer. You only output corrected Mermaid code inside a fenced markdown block.' },
     { role: 'user', content: buildFixPrompt(req) },
-  ], 500);
+  ], 500, 'fix');
 }
 
 export async function describeDiagram(mermaid: string): Promise<string> {
@@ -315,5 +369,5 @@ export async function describeDiagram(mermaid: string): Promise<string> {
   return requestLLM([
     { role: 'system', content: 'You are an expert at understanding Mermaid diagrams. Describe the provided diagram in plain English. Keep it concise, structured, and easy to understand.' },
     { role: 'user', content: `Here is a Mermaid diagram:\n\n\`\`\`mermaid\n${mermaid}\n\`\`\`\n\nPlease describe what this diagram represents.` },
-  ]);
+  ], 1000, 'describe');
 }

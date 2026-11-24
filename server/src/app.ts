@@ -103,6 +103,15 @@ export function createApp() {
     res.send(metrics.getPrometheusMetrics());
   });
 
+  app.get('/metrics/providers', asyncHandler(async (_req, res) => {
+    const durable = await metrics.getDurableProviderMetrics();
+    res.json({
+      store: durable ? 'upstash' : 'in-memory',
+      durableAvailable: durable !== null,
+      providers: durable ?? metrics.getProviderMetrics(),
+    });
+  }));
+
   app.get('/api/openapi.json', (_req, res) => {
     res.setHeader('Content-Type', 'application/json');
     res.json(openApiSpec);

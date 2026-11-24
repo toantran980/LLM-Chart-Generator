@@ -19,6 +19,8 @@ All `VITE_*` values are embedded in the public browser bundle. Never put databas
 | `POSTGRES_URL` | Recommended | Neon Postgres URL for durable sharing; `DATABASE_URL` is a supported alias |
 | `OPENAI_API_KEY` | If using OpenAI | Private provider key; backend only |
 | `OPENAI_API_URL` | Optional | Custom OpenAI-compatible chat-completions endpoint |
+| `OPENAI_INPUT_USD_PER_1M_TOKENS` | Optional | Input-token price for the configured OpenAI model; enables estimated request costs |
+| `OPENAI_OUTPUT_USD_PER_1M_TOKENS` | Optional | Output-token price for the configured OpenAI model; enables estimated request costs |
 | `LLM_PROVIDER` | Optional | `openai` (default), `ollama`, or `fallback` |
 | `LLM_TIMEOUT_MS` | Optional | Provider request timeout; default `60000` |
 | `OLLAMA_URL` | If using Ollama | Provider base URL reachable from the backend |
@@ -31,12 +33,18 @@ All `VITE_*` values are embedded in the public browser bundle. Never put databas
 | `UPSTASH_REDIS_REST_TOKEN` | Optional | Upstash REST token, required with the URL |
 | `RATE_LIMIT_MAX` | Optional | Requests per IP per window; default `20` |
 | `RATE_LIMIT_WINDOW_MS` | Optional | Rate-limit window in milliseconds; default `60000` |
-| `DAILY_RATE_LIMIT_MAX` | Optional | Daily requests per IP; default `200`. Verified Bearer callers bypass public quotas. |
+| `DAILY_RATE_LIMIT_MAX` | Optional | Daily requests per IP; default `200`. Verified Bearer callers use separate `AUTH_*` quotas. |
 | `DAILY_RATE_LIMIT_WINDOW_MS` | Optional | In-memory daily quota window in milliseconds; default `86400000` |
+| `GLOBAL_DAILY_RATE_LIMIT_MAX` | Optional | Daily requests across all callers; default `1000`. Shared across instances when Upstash is configured. |
+| `AUTH_RATE_LIMIT_MAX` | Optional | Requests per window for verified Bearer callers, enforced per verified identity and caller IP; default `20` |
+| `AUTH_RATE_LIMIT_WINDOW_MS` | Optional | Verified Bearer caller window in milliseconds; defaults to `60000` |
+| `AUTH_DAILY_RATE_LIMIT_MAX` | Optional | Daily requests for verified Bearer callers, enforced per verified identity and caller IP; default `200` |
 | `CLEANUP_ENABLED` | Optional | Set `false` to disable periodic cleanup; default enabled |
 | `CLEANUP_INTERVAL_HOURS` | Optional | Cleanup interval; default `24` |
 | `CLEANUP_RETENTION_DAYS` | Optional | Delete shares not accessed within this many days; default `90` |
 | `SENTRY_DSN` | Optional | Enables Sentry error reporting |
+
+Bearer quotas are keyed by the verified server identity and caller IP. If a trusted server uses one `SERVER_API_KEY` for multiple authenticated users, it can forward a normalized `X-User-ID` so each verified user gets a separate identity quota. Never accept that header as identity from an unauthenticated or browser client.
 
 ## Database and migrations
 
@@ -54,7 +62,7 @@ When Upstash is configured, `/ready` checks its connectivity. When it is not con
 
 ## Monitoring
 
-`SENTRY_DSN` is optional. Without it, the service still runs but does not send exceptions to Sentry. Add the DSN to the Render backend environment and configure Sentry alert rules separately. The API also exposes process-local Prometheus metrics at `/metrics`.
+`SENTRY_DSN` is optional. Without it, the service still runs but does not send exceptions to Sentry. Add the DSN to the Render backend environment and configure Sentry alert rules separately. `/metrics` exposes process-local HTTP and provider metrics in Prometheus format. `/metrics/providers` returns provider aggregates from Upstash when configured, or process-local aggregates otherwise. Provider-reported token counts are used when available; otherwise prompt tokens are estimated from input length and completion tokens use the requested output limit. OpenAI cost estimates require both per-million-token price variables and use those configured rates. Ollama cost is not estimated.
 
 ## Rollback
 

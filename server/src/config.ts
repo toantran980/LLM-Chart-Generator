@@ -96,6 +96,17 @@ export function validateStartupConfig(): ConfigValidationResult {
       warnings.push(`DAILY_RATE_LIMIT_MAX must be a positive number; received "${process.env.DAILY_RATE_LIMIT_MAX}". Using default.`);
     }
   }
+  for (const name of [
+    'AUTH_RATE_LIMIT_MAX',
+    'AUTH_RATE_LIMIT_WINDOW_MS',
+    'AUTH_DAILY_RATE_LIMIT_MAX',
+    'GLOBAL_DAILY_RATE_LIMIT_MAX',
+  ]) {
+    const raw = process.env[name];
+    if (raw && (!Number.isInteger(Number(raw)) || Number(raw) <= 0)) {
+      warnings.push(`${name} must be a positive integer; received "${raw}". Using default.`);
+    }
+  }
 
   // 6. Validate Server Auth configuration
   if (process.env.REQUIRE_PRIVATE_AUTH === 'true' && !process.env.SERVER_API_KEY) {

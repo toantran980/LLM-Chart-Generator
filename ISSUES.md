@@ -36,11 +36,12 @@ should be addressed before promoting this project beyond a personal/public demo.
 
 ### [Cost] Public LLM usage needs stronger OpenAI cost controls (deprecated or later)
 
-- [ ] Set a hard monthly OpenAI spending limit and budget alerts.
-- [ ] Use separate API keys and quotas for development and public production.
+- [X] Set a hard monthly OpenAI spending limit and budget alerts.
+- [X] Use separate API keys and quotas for development and public production.
 - [X] Add a daily request quota per caller IP.
-- [ ] Add verified per-identity and global daily usage limits; authenticated Bearer callers currently bypass public quotas.
-- [ ] Record provider latency and estimated/requested token cost.
+- [X] Enforce rate and daily quotas per verified Bearer identity and caller IP (`AUTH_*` limits).
+- [X] Add a global daily usage ceiling across all callers (`GLOBAL_DAILY_RATE_LIMIT_MAX`, default `1000`).
+- [X] Record provider latency, provider-reported or estimated prompt tokens, requested completion tokens, and optional estimated OpenAI cost (`/metrics/providers`).
 - [X] Document fallback behavior for provider errors and budget exhaustion (`docs/deployment.md`).
 
 ## High
@@ -90,7 +91,8 @@ should be addressed before promoting this project beyond a personal/public demo.
 ### [Reliability] In-memory metrics and fallback state are not durable
 
 - [X] Request metrics are process-local and disappear on restart.
-- [ ] Durable Upstash counters are written, but `/health` and `/metrics` currently expose process-local counters; wire durable metrics into an endpoint or monitoring exporter.
+- [X] Expose durable provider aggregates through `/metrics/providers` when Upstash is configured.
+- [ ] Expose durable HTTP request and fallback counters currently stored in Upstash; `/health` and `/metrics` still report process-local HTTP counters.
 - [X] Export process-local metrics in Prometheus exposition format (`/metrics`).
 - [ ] Configure and verify alerts for elevated 5xx rates, LLM errors, timeouts, and database failures (README lists suggested Sentry rules; no alert configuration is present in this repository).
 
@@ -107,22 +109,22 @@ should be addressed before promoting this project beyond a personal/public demo.
 
 - [X] Add post-deploy smoke tests calling `/health`, `/ready`, generation, refinement, sharing, or retrieval (`scripts/smoke-test.mjs`).
 - [X] Gate pull requests on Docker integration smoke tests confirming client and server compatibility.
-- [ ] Add versioned client/server release checks.
+- [X] Check client/server package versions in CI and match release tags to package version (`release:check`).
 - [X] Document manual rollback steps for Vercel and Render (`docs/deployment.md`).
 
 ### [Observability] Provider cost and latency are not fully measurable
 
-- [ ] Existing metrics record endpoint latency and request counts, but provider latency, token usage, cost, and error classes are not durable.
-- [ ] Add provider and per-endpoint telemetry.
+- [X] Record provider latency, errors, token usage, and optional cost estimates in Upstash when configured.
+- [X] Expose provider and per-endpoint telemetry through `/metrics` and `/metrics/providers`.
 - [ ] Configure alerts for latency, timeout, quota, and spend anomalies.
 
 ### [Security] Share and API routes need broader abuse controls
 
 - [X] Share routes have rate limiting.
 - [X] Reframe API key in client as abuse deterrent in documentation.
-- [ ] CORS is allowlisted, but browser-only controls do not stop direct API requests.
-- [ ] Consider an edge WAF or bot protection.
-- [ ] Add request quotas by verified identity and IP where possible.
+- [ ] CORS allowlisting is not API access control; direct callers remain possible.
+- [ ] Add an edge WAF or bot protection (requires a custom domain and provider-side configuration).
+- [X] Add request quotas by verified identity and IP where possible (`AUTH_*` limits).
 
 ### [Performance] Client bundle size needs optimization
 
@@ -163,4 +165,4 @@ should be addressed before promoting this project beyond a personal/public demo.
 - [ ] OpenAI hard budgets and alerts are configured.
 - [X] `/health` and `/ready` have separate, correct meanings.
 - [ ] Shared rate limiting is configured and verified across more than one running instance (Upstash support and a readiness probe exist; multi-instance verification is still outstanding).
-- [ ] Provider latency and cost are monitored (not currently recorded); process-local HTTP metrics, database readiness, uptime, and Sentry error reporting have partial coverage.
+- [X] Provider latency, token usage, requested completion budget, and optional OpenAI cost estimates are recorded; alerts still require external configuration.

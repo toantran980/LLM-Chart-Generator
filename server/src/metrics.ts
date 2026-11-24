@@ -15,7 +15,22 @@ export interface LastError {
   at: string;
 }
 
+export interface ProviderRequestMetric {
+  requests: number;
+  errors: number;
+  totalLatencyMs: number;
+  lastLatencyMs: number;
+  promptTokens: number;
+  estimatedPromptTokens: number;
+  completionTokens: number;
+  requestedCompletionTokens: number;
+  estimatedCostUsd: number;
+  costEstimates: number;
+  lastErrorCode: string | null;
+}
+
 const endpointStats = new Map<string, RequestMetric>();
+const providerStats = new Map<string, ProviderRequestMetric>();
 let totalRequests = 0;
 let fallbackCount = 0;
 let lastError: LastError | null = null;
@@ -46,6 +61,119 @@ export function recordRequest(path: string, statusCode: number, durationMs: numb
     ]).catch((err) => {
       log('warn', 'Failed to update durable metrics in Redis', { error: String(err) });
     });
+  }
+}
+
+export function recordProviderRequest(input: {
+  provider: 'openai' | 'ollama';
+  operation: 'generate' | 'refine' | 'fix' | 'describe';
+  durationMs: number;
+  promptTokens: number;
+  promptTokensEstimated: boolean;
+  completionTokens?: number;
+  requestedCompletionTokens: number;
+  estimatedCostUsd: number | null;
+  errorCode?: string;
+}): void {
+  const key = `${input.provider}.${input.operation}`;
+  const stat = providerStats.get(key) ?? {
+    requests: 0,
+    errors: 0,
+    totalLatencyMs: 0,
+    lastLatencyMs: 0,
+    promptTokens: 0,
+    estimatedPromptTokens: 0,
+    completionTokens: 0,
+    requestedCompletionTokens: 0,
+    estimatedCostUsd: 0,
+    costEstimates: 0,
+    lastErrorCode: null,
+  };
+
+  stat.requests += 1;
+  stat.totalLatencyMs += input.durationMs;
+  stat.lastLatencyMs = input.durationMs;
+  stat.promptTokens += input.promptTokens;
+  if (input.promptTokensEstimated) stat.estimatedPromptTokens += input.promptTokens;
+  stat.completionTokens += input.completionTokens ?? 0;
+  stat.requestedCompletionTokens += input.requestedCompletionTokens;
+  if (input.estimatedCostUsd !== null) {
+    stat.estimatedCostUsd += input.estimatedCostUsd;
+    stat.costEstimates += 1;
+  }
+  if (input.errorCode) {
+    stat.errors += 1;
+    stat.lastErrorCode = input.errorCode;
+  }
+  providerStats.set(key, stat);
+
+  const redis = getRedisClient();
+  if (redis) {
+    const redisKey = `metrics:provider:${input.provider}:${input.operation}`;
+    const updates = [
+      redis.hincrby(redisKey, 'requests', 1),
+      redis.hincrby(redisKey, 'latencyMsTotal', Math.round(input.durationMs)),
+      redis.hincrby(redisKey, 'promptTokens', input.promptTokens),
+      redis.hincrby(redisKey, 'estimatedPromptTokens', input.promptTokensEstimated ? input.promptTokens : 0),
+      redis.hincrby(redisKey, 'completionTokens', input.completionTokens ?? 0),
+      redis.hincrby(redisKey, 'requestedCompletionTokens', input.requestedCompletionTokens),
+    ];
+    if (input.errorCode) updates.push(redis.hincrby(redisKey, 'errors', 1));
+    if (input.estimatedCostUsd !== null) {
+      updates.push(redis.hincrby(redisKey, 'estimatedCostMicrosUsd', Math.round(input.estimatedCostUsd * 1_000_000)));
+      updates.push(redis.hincrby(redisKey, 'costEstimates', 1));
+    }
+    Promise.all([
+      ...updates,
+      redis.hset(redisKey, {
+        lastLatencyMs: Math.round(input.durationMs),
+        lastErrorCode: input.errorCode ?? '',
+      }),
+    ]).catch((err) => {
+      log('warn', 'Failed to persist provider metrics in Redis', { error: String(err) });
+    });
+  }
+}
+
+export function getProviderMetrics(): Record<string, ProviderRequestMetric> {
+  return Object.fromEntries(providerStats);
+}
+
+export async function getDurableProviderMetrics(): Promise<Record<string, ProviderRequestMetric> | null> {
+  const redis = getRedisClient();
+  if (!redis) return null;
+
+  const pairs = (['openai', 'ollama'] as const).flatMap((provider) =>
+    (['generate', 'refine', 'fix', 'describe'] as const).map((operation) => ({ provider, operation })),
+  );
+
+  try {
+    const rows = await Promise.all(pairs.map(async ({ provider, operation }) => {
+      const data = await redis.hgetall(`metrics:provider:${provider}:${operation}`);
+      const raw = (data ?? {}) as Record<string, string | number>;
+      const numberField = (name: string) => Number(raw[name] ?? 0) || 0;
+      const requests = numberField('requests');
+      return [
+        `${provider}.${operation}`,
+        {
+          requests,
+          errors: numberField('errors'),
+          totalLatencyMs: numberField('latencyMsTotal'),
+          lastLatencyMs: numberField('lastLatencyMs'),
+          promptTokens: numberField('promptTokens'),
+          estimatedPromptTokens: numberField('estimatedPromptTokens'),
+          completionTokens: numberField('completionTokens'),
+          requestedCompletionTokens: numberField('requestedCompletionTokens'),
+          estimatedCostUsd: numberField('estimatedCostMicrosUsd') / 1_000_000,
+          costEstimates: numberField('costEstimates'),
+          lastErrorCode: typeof raw.lastErrorCode === 'string' && raw.lastErrorCode ? raw.lastErrorCode : null,
+        } satisfies ProviderRequestMetric,
+      ] as const;
+    }));
+    return Object.fromEntries(rows.filter(([, metric]) => metric.requests > 0));
+  } catch (err) {
+    log('warn', 'Failed to read durable provider metrics from Redis', { error: String(err) });
+    return null;
   }
 }
 
@@ -117,6 +245,7 @@ export function getMetrics() {
     fallbackCount,
     lastError,
     endpoints: Object.fromEntries(endpointStats),
+    providers: Object.fromEntries(providerStats),
     durableStore: Boolean(process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN),
   };
 }
@@ -141,11 +270,32 @@ export function getPrometheusMetrics(): string {
     lines.push(`http_endpoint_last_duration_ms{path="${sanitizedPath}"} ${stat.lastMs}`);
   }
 
+  lines.push(
+    '',
+    '# HELP llm_provider_requests_total Completed or failed LLM provider requests.',
+    '# TYPE llm_provider_requests_total counter',
+  );
+  for (const [label, stat] of providerStats.entries()) {
+    const [provider, operation] = label.split('.');
+    const labels = `provider="${provider}",operation="${operation}"`;
+    lines.push(`llm_provider_requests_total{${labels}} ${stat.requests}`);
+    lines.push(`llm_provider_errors_total{${labels}} ${stat.errors}`);
+    lines.push(`llm_provider_request_duration_ms_total{${labels}} ${stat.totalLatencyMs}`);
+    lines.push(`llm_provider_prompt_tokens_total{${labels}} ${stat.promptTokens}`);
+    lines.push(`llm_provider_estimated_prompt_tokens_total{${labels}} ${stat.estimatedPromptTokens}`);
+    lines.push(`llm_provider_completion_tokens_total{${labels}} ${stat.completionTokens}`);
+    lines.push(`llm_provider_requested_completion_tokens_total{${labels}} ${stat.requestedCompletionTokens}`);
+    if (stat.costEstimates > 0) {
+      lines.push(`llm_provider_estimated_cost_usd_total{${labels}} ${stat.estimatedCostUsd}`);
+    }
+  }
+
   return lines.join('\n') + '\n';
 }
 
 export function resetMetrics(): void {
   endpointStats.clear();
+  providerStats.clear();
   totalRequests = 0;
   fallbackCount = 0;
   lastError = null;
