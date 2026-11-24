@@ -11,7 +11,17 @@ if (versions.size !== 1) {
   throw new Error(`Release package versions must match: ${packages.map(({ file, version }) => `${file}=${version}`).join(', ')}`);
 }
 
-const tag = process.env.GITHUB_REF_NAME;
+// GitHub sets GITHUB_REF_NAME for branches as well as tags (for example,
+// "main" on pushes to the default branch). Only compare it with package
+// versions when this workflow is running for an actual tag.
+const refType = process.env.GITHUB_REF_TYPE;
+const fullRef = process.env.GITHUB_REF;
+const tag = refType === 'tag'
+  ? process.env.GITHUB_REF_NAME
+  : fullRef?.startsWith('refs/tags/')
+    ? fullRef.slice('refs/tags/'.length)
+    : undefined;
+
 if (tag) {
   const tagVersion = tag.replace(/^v/, '');
   const packageVersion = packages[0].version;
