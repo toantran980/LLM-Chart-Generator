@@ -1,5 +1,5 @@
 services:
-  backend:
+  server:
     build:
       context: .
       dockerfile: ./server/Dockerfile
@@ -25,14 +25,14 @@ services:
       - DATABASE_URL=${DATABASE_URL:-}
     restart: unless-stopped
 
-  frontend:
+  client:
     build:
       context: .
       dockerfile: ./client/Dockerfile
     ports:
       - "80:8080"
     depends_on:
-      - backend
+      - server
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/"]
       interval: 30s

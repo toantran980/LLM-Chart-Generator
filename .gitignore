@@ -11,8 +11,8 @@ Thumbs.db
 
 # Dependencies
 node_modules/
-frontend/node_modules/
-backend/node_modules/
+client/node_modules/
+server/node_modules/
 
 # Build / bundler caches
 .vite/
@@ -20,7 +20,7 @@ dist/
 dist-ssr/
 build/
 .cache/
-backend/dist/
+server/dist/
 
 # Environment files
 .env

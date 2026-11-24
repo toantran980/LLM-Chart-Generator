@@ -6,8 +6,8 @@
  * functioning correctly and can communicate through the reverse proxy.
  */
 
-const BACKEND_URL = (process.env.SMOKE_BACKEND_URL || 'http://127.0.0.1:4000').replace(/\/+$/, '');
-const FRONTEND_URL = (process.env.SMOKE_FRONTEND_URL || 'http://127.0.0.1:80').replace(/\/+$/, '');
+const SERVER_URL = (process.env.SMOKE_SERVER_URL || 'http://127.0.0.1:4000').replace(/\/+$/, '');
+const CLIENT_URL = (process.env.SMOKE_CLIENT_URL || 'http://127.0.0.1:80').replace(/\/+$/, '');
 const MAX_ATTEMPTS = 30;
 const DELAY_MS = 2000;
 
@@ -36,45 +36,45 @@ async function waitForEndpoint(url, expectedStatus = 200, maxAttempts = MAX_ATTE
 async function runSmokeTests() {
   console.log('====================================================');
   console.log(' Starting Container Smoke Tests');
-  console.log(` Backend:  ${BACKEND_URL}`);
-  console.log(` Frontend: ${FRONTEND_URL}`);
+  console.log(` Server:  ${SERVER_URL}`);
+  console.log(` Client: ${CLIENT_URL}`);
   console.log('====================================================\n');
 
-  // 1. Probe Backend /ready
-  console.log('1. Probing Backend /ready...');
-  const readyData = await waitForEndpoint(`${BACKEND_URL}/ready`, 200);
+  // 1. Probe Server /ready
+  console.log('1. Probing Server /ready...');
+  const readyData = await waitForEndpoint(`${SERVER_URL}/ready`, 200);
   if (!readyData || readyData.ok !== true) {
-    throw new Error(`Backend /ready reported unhealthy state: ${JSON.stringify(readyData)}`);
+    throw new Error(`Server /ready reported unhealthy state: ${JSON.stringify(readyData)}`);
   }
-  console.log('   [PASS] Backend /ready is healthy.\n');
+  console.log('   [PASS] Server /ready is healthy.\n');
 
-  // 2. Probe Backend /health
-  console.log('2. Probing Backend /health...');
-  const healthRes = await fetch(`${BACKEND_URL}/health`);
+  // 2. Probe Server /health
+  console.log('2. Probing Server /health...');
+  const healthRes = await fetch(`${SERVER_URL}/health`);
   if (!healthRes.ok) {
-    throw new Error(`Backend /health returned status ${healthRes.status}`);
+    throw new Error(`Server /health returned status ${healthRes.status}`);
   }
   const healthData = await healthRes.json();
   if (!healthData || healthData.ok !== true || typeof healthData.uptime !== 'number') {
     throw new Error(`Invalid /health response: ${JSON.stringify(healthData)}`);
   }
-  console.log(`   [PASS] Backend /health reports uptime: ${healthData.uptime}s, fallback: ${healthData.fallback}.\n`);
+  console.log(`   [PASS] Server /health reports uptime: ${healthData.uptime}s, fallback: ${healthData.fallback}.\n`);
 
-  // 3. Probe Frontend HTML
-  console.log('3. Probing Frontend static serving...');
-  const frontendRes = await fetch(`${FRONTEND_URL}/`);
-  if (!frontendRes.ok) {
-    throw new Error(`Frontend returned status ${frontendRes.status}`);
+  // 3. Probe Client HTML
+  console.log('3. Probing Client static serving...');
+  const clientRes = await fetch(`${CLIENT_URL}/`);
+  if (!clientRes.ok) {
+    throw new Error(`Client returned status ${clientRes.status}`);
   }
-  const html = await frontendRes.text();
+  const html = await clientRes.text();
   if (!html.includes('<!doctype html') && !html.includes('<!DOCTYPE html')) {
-    throw new Error('Frontend response does not appear to be valid HTML');
+    throw new Error('Client response does not appear to be valid HTML');
   }
-  console.log('   [PASS] Frontend Nginx served index.html successfully.\n');
+  console.log('   [PASS] Client Nginx served index.html successfully.\n');
 
   // 4. Test Diagram Generation via Frontend Proxy
-  console.log('4. Testing diagram generation via Frontend proxy (POST /api/diagram)...');
-  const genRes = await fetch(`${FRONTEND_URL}/api/diagram`, {
+  console.log('4. Testing diagram generation via Client proxy (POST /api/diagram)...');
+  const genRes = await fetch(`${CLIENT_URL}/api/diagram`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -94,7 +94,7 @@ async function runSmokeTests() {
 
   // 5. Test Diagram Sharing & Retrieval via Frontend Proxy
   console.log('5. Testing diagram sharing & retrieval (POST /api/diagrams/share & GET /api/diagrams/:id)...');
-  const shareRes = await fetch(`${FRONTEND_URL}/api/diagrams/share`, {
+  const shareRes = await fetch(`${CLIENT_URL}/api/diagrams/share`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -114,7 +114,7 @@ async function runSmokeTests() {
   }
 
   // Retrieve shared diagram
-  const getRes = await fetch(`${FRONTEND_URL}/api/diagrams/${shareData.id}`);
+  const getRes = await fetch(`${CLIENT_URL}/api/diagrams/${shareData.id}`);
   if (!getRes.ok) {
     throw new Error(`GET /api/diagrams/${shareData.id} returned status ${getRes.status}`);
   }

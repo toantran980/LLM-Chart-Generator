@@ -41,7 +41,7 @@ should be addressed before promoting this project beyond a personal/public demo.
 - [X] Add a daily request quota per caller IP.
 - [ ] Add verified per-identity and global daily usage limits; authenticated Bearer callers currently bypass public quotas.
 - [ ] Record provider latency and estimated/requested token cost.
-- [ ] Define a fallback policy for provider errors and budget exhaustion.
+- [X] Document fallback behavior for provider errors and budget exhaustion (`docs/deployment.md`).
 
 ## High
 
@@ -65,7 +65,7 @@ should be addressed before promoting this project beyond a personal/public demo.
 ### [Docker] Production containers are not reproducible or fully checked
 
 - [X] Both Dockerfiles install workspace dependencies with `npm ci` and the root lockfile.
-- [X] CI builds both server and client Docker images on pushes to main.
+- [X] CI builds both server and client Docker images and runs integration smoke tests on pushes and pull requests.
 - [X] Server image and Compose probe `/ready`; client image and Compose probe the served page.
 - [X] Compose intentionally does not block the client on server health so the UI remains available during API/database outages.
 - [X] Build and smoke-test both containers together (`docker compose up --build` with `scripts/smoke-test.mjs` in CI).
@@ -106,9 +106,9 @@ should be addressed before promoting this project beyond a personal/public demo.
 ### [Infrastructure] No explicit deployment verification or rollback
 
 - [X] Add post-deploy smoke tests calling `/health`, `/ready`, generation, refinement, sharing, or retrieval (`scripts/smoke-test.mjs`).
-- [ ] Add deployment status gate confirming client and server are compatible.
+- [X] Gate pull requests on Docker integration smoke tests confirming client and server compatibility.
 - [ ] Add versioned client/server release checks.
-- [ ] Add rollback instructions or an automated rollback trigger.
+- [X] Document manual rollback steps for Vercel and Render (`docs/deployment.md`).
 
 ### [Observability] Provider cost and latency are not fully measurable
 

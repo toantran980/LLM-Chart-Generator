@@ -23,10 +23,10 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Lint frontend
+      - name: Lint client
         run: npm run client:lint
 
-      - name: Run full test suite (backend & frontend)
+      - name: Run full test suite (server & client)
         run: npm test
 
       - name: Build workspaces
@@ -62,7 +62,6 @@ jobs:
   docker:
     name: Build & Smoke-Test Containers
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: [test, security]
     steps:
       - uses: actions/checkout@v5

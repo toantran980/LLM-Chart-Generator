@@ -2,7 +2,7 @@ import type { RequestHandler } from 'express';
 import { ApiError } from '../errors';
 
 export interface AuthContext {
-  type: 'bearer' | 'frontend_deterrent' | 'open';
+  type: 'bearer' | 'client_deterrent' | 'open';
   identity: string;
 }
 
@@ -56,7 +56,7 @@ export function requireApiSecret(): RequestHandler {
     // 3. Check public frontend deterrent key (APP_API_KEY)
     if (publicSecret) {
       if (xApiKey === publicSecret) {
-        req.auth = { type: 'frontend_deterrent', identity: 'frontend' };
+        req.auth = { type: 'client_deterrent', identity: 'client' };
         return next();
       }
       return next(new ApiError('Unauthorized', 401, 'UNAUTHORIZED'));

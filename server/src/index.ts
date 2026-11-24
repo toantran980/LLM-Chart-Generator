@@ -16,7 +16,7 @@ const PORT = process.env.PORT || 4173;
 const cleanupJob = startPeriodicCleanup();
 
 const server = app.listen(PORT, () => {
-  log('info', 'backend listening', { port: PORT, url: `http://localhost:${PORT}` });
+  log('info', 'server listening', { port: PORT, url: `http://localhost:${PORT}` });
   if (!isLlmConfigured()) {
     log('warn', 'No LLM configured — running in fallback mode (local parser)');
   } else {

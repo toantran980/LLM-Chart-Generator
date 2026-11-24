@@ -55,14 +55,14 @@ describe('Server-Side Authentication & Abuse Controls', () => {
 
   it('enforces REQUIRE_PRIVATE_AUTH by rejecting public X-API-Key and requiring Bearer', async () => {
     process.env.SERVER_API_KEY = 'secret-server-key';
-    process.env.APP_API_KEY = 'public-frontend-key';
+    process.env.APP_API_KEY = 'public-client-key';
     process.env.REQUIRE_PRIVATE_AUTH = 'true';
     const app = createApp();
 
     // 1. Attempt using public frontend key should be rejected
     const publicRes = await request(app)
       .post('/api/diagram')
-      .set('X-API-Key', 'public-frontend-key')
+      .set('X-API-Key', 'public-client-key')
       .send({ text: 'A to B', diagramType: 'flowchart' });
 
     expect(publicRes.status).toBe(401);

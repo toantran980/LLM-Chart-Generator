@@ -42,6 +42,10 @@ All `VITE_*` values are embedded in the public browser bundle. Never put databas
 
 Set `POSTGRES_URL` to enable durable share links. Run migrations during release/pre-deploy, for example with `npm run db:migrate`. Without a database URL, share links are process-local and do not survive backend restarts. With the database configured, failed writes return `503 DATABASE_ERROR` rather than a false success.
 
+## Provider failure and budget policy
+
+Diagram generation degrades to the local parser if the configured LLM is unavailable, returns an error, or rejects a request because of a provider quota or billing limit. The API logs the failure and records a fallback count; it does not retry the provider request. Refinement and Mermaid repair require the LLM and return an API error when the provider request fails. Descriptions use a local explanatory response only when no LLM is configured; provider errors are returned to the caller. Configure spending limits and alerts in the provider account because this application does not enforce a dollar budget.
+
 ## Redis on Render
 
 This backend currently uses Upstash's REST API, configured by `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN`. Render Key Value provides a standard Redis protocol URL in `REDIS_URL`; the current backend does not consume it. If only `REDIS_URL` is set, rate limiting falls back to process-local memory. Use Upstash REST credentials for shared rate limiting until native Redis URL support is implemented.
@@ -51,6 +55,16 @@ When Upstash is configured, `/ready` checks its connectivity. When it is not con
 ## Monitoring
 
 `SENTRY_DSN` is optional. Without it, the service still runs but does not send exceptions to Sentry. Add the DSN to the Render backend environment and configure Sentry alert rules separately. The API also exposes process-local Prometheus metrics at `/metrics`.
+
+## Rollback
+
+### Vercel frontend
+
+In the Vercel Dashboard, open the project’s **Deployments** page, choose the last known-good production deployment, and use **Instant Rollback**. Verify the production domain and browser console afterward. An instant rollback reuses the previous build, so changing `VITE_API_BASE` in project settings does not update that build; redeploy if the API URL or other build-time variables changed. Vercel rollback behavior and plan limits are described in the [rollback docs](https://vercel.com/docs/deployments/rollback-production-deployment).
+
+### Render API
+
+In the Render Dashboard, open the web service’s **Deploys** page, select a recent successful deploy, and click **Rollback**. Verify `/health`, `/ready`, and a generation request. A dashboard rollback disables automatic deploys for that service; after fixing the issue, re-enable autodeploy from the service’s Settings page. Rollback availability depends on retained build artifacts. See [Render’s rollback docs](https://render.com/docs/rollbacks).
 
 ## Production checklist
 
