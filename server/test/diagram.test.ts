@@ -17,7 +17,7 @@ describe('generateDiagram', () => {
     const result = await generateDiagram({ text: 'Start\nNext', diagramType: 'flowchart' });
 
     expect(result).toMatch(/flowchart TD/);
-    expect(result).toMatch(/-->/);
+    expect(result).toContain('-->');
   });
 
   it('falls back when LLM throws', async () => {
@@ -26,7 +26,7 @@ describe('generateDiagram', () => {
     const result = await generateDiagram({ text: 'Start\nNext', diagramType: 'flowchart' });
 
     expect(result).toMatch(/flowchart TD/);
-    expect(result).toMatch(/-->/);
+    expect(result).toContain('-->');
   });
 
   it('selects a built-in type when auto mode falls back', async () => {

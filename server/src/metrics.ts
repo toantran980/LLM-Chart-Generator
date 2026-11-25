@@ -305,7 +305,10 @@ export function getPrometheusMetrics(m = getMetrics()): string {
   ];
 
   for (const [path, stat] of Object.entries(m.endpoints)) {
-    const sanitizedPath = path.replace(/"/g, '\\"');
+    const sanitizedPath = path
+      .replace(/\\/g, '\\\\')
+      .replace(/"/g, '\\"')
+      .replace(/\r\n?|\n/g, '\\n');
     lines.push(`http_endpoint_requests_total{path="${sanitizedPath}"} ${stat.count}`);
     lines.push(`http_endpoint_errors_total{path="${sanitizedPath}"} ${stat.errors}`);
     lines.push(`http_endpoint_last_duration_ms{path="${sanitizedPath}"} ${stat.lastMs}`);

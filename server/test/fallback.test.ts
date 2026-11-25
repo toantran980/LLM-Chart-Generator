@@ -10,7 +10,7 @@ describe('fallbackDiagram', () => {
     });
 
     expect(result).toMatch(/flowchart TD/);
-    expect(result).toMatch(/-->/);
+    expect(result).toContain('-->');
     expect(result).toMatch(/```mermaid/);
   });
 

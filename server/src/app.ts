@@ -2,6 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import compression from 'compression';
+import { rateLimit } from 'express-rate-limit';
 import { generateDiagram, refineDiagram, fixMermaid } from './diagram';
 import { describeDiagram, getLlmProvider, isLlmConfigured, checkLlmProviderHealth } from './llm';
 import type { DiagramRequest } from '../../shared/types';
@@ -25,6 +26,12 @@ export function createApp() {
   getLlmProvider();
   const app = express();
   app.set('trust proxy', 1);
+  const requestRateLimit = rateLimit({
+    windowMs: 60_000,
+    limit: 120,
+    standardHeaders: true,
+    legacyHeaders: false,
+  });
 
   app.use(helmet());
   app.use(compression());
@@ -80,7 +87,7 @@ export function createApp() {
     });
   }));
 
-  app.get('/ready', asyncHandler(async (_req, res) => {
+  app.get('/ready', requestRateLimit, asyncHandler(async (_req, res) => {
     const [database, llm, rateLimiter] = await Promise.all([
       getDatabaseStatus(),
       checkLlmProviderHealth(),
@@ -143,6 +150,7 @@ export function createApp() {
 
   app.post(
     '/api/diagram',
+    requestRateLimit,
     apiAuth,
     llmRateLimit,
     validateDiagramRequest,
@@ -154,6 +162,7 @@ export function createApp() {
 
   app.post(
     '/api/refine',
+    requestRateLimit,
     apiAuth,
     llmRateLimit,
     validateRefineRequest,
@@ -166,6 +175,7 @@ export function createApp() {
 
   app.post(
     '/api/fix',
+    requestRateLimit,
     apiAuth,
     llmRateLimit,
     validateFixRequest,
@@ -178,6 +188,7 @@ export function createApp() {
 
   app.post(
     '/api/describe',
+    requestRateLimit,
     apiAuth,
     llmRateLimit,
     validateDescribeRequest,
@@ -190,6 +201,7 @@ export function createApp() {
 
   app.post(
     '/api/diagrams/share',
+    requestRateLimit,
     apiAuth,
     llmRateLimit,
     validateShareRequest,
