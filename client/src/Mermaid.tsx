@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
-import mermaid from 'mermaid';
 import type { MermaidConfig } from 'mermaid';
 import { computeFitZoom, buildMermaidLiveUrl } from './utils/diagram';
 
@@ -148,6 +147,7 @@ async function renderMermaid(
   containerEl: HTMLDivElement,
   theme: string = 'base',
 ): Promise<ContentBounds> {
+  const { default: mermaid } = await import('mermaid');
   const resolvedTheme: MermaidTheme = isMermaidTheme(theme) ? theme : 'base';
   mermaid.initialize({
     startOnLoad: false,

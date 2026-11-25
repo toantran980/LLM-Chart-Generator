@@ -12,7 +12,7 @@ export const openApiSpec = {
     '/health': {
       get: {
         summary: 'Health & runtime metrics',
-        description: 'Reports service health, fallback mode, uptime, memory, and in-memory metrics.',
+        description: 'Reports service health, fallback mode, uptime, memory, and metrics. HTTP and fallback counters use shared Upstash aggregates when available, otherwise process-local values.',
         responses: {
           '200': { description: 'Service healthy', content: { 'application/json': { schema: { $ref: '#/components/schemas/Health' } } } },
         },
@@ -31,7 +31,7 @@ export const openApiSpec = {
     '/metrics': {
       get: {
         summary: 'Prometheus metrics',
-        description: 'Exposes HTTP request and fallback metrics in Prometheus text exposition format.',
+        description: 'Exposes HTTP request, 4xx/5xx, endpoint, and fallback metrics in Prometheus text format. Uses shared Upstash aggregates when available, otherwise process-local values.',
         responses: {
           '200': { description: 'Prometheus metrics text' },
         },

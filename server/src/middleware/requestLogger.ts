@@ -7,7 +7,9 @@ export const requestLogger: RequestHandler = (req, res, next) => {
 
   res.on('finish', () => {
     const durationMs = Date.now() - start;
-    recordRequest(req.path, res.statusCode, durationMs);
+    const routePath = req.route?.path;
+    const metricPath = routePath ? `${req.baseUrl}${String(routePath)}` : 'unmatched';
+    recordRequest(metricPath, res.statusCode, durationMs);
     log('info', 'request completed', {
       requestId: (req as any).id,
       method: req.method,

@@ -35,6 +35,9 @@ jobs:
       - name: Build workspaces
         run: npm run build
 
+      - name: Check client performance budgets
+        run: npm run client:budget
+
   security:
     runs-on: ubuntu-latest
     permissions:

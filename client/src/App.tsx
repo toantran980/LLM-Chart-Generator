@@ -1,6 +1,6 @@
 import './App.css';
 import './mermaid-overrides.css';
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { lazy, Suspense, useState, useRef, useEffect, useCallback } from 'react';
 import useSelection from './hooks/useSelection';
 import { postDiagram, postRefine, fetchSharedDiagram } from './utils/api';
 import { moveCaretToEnd } from './utils/dom';
@@ -9,12 +9,13 @@ import Controls from './components/Controls';
 import RefineBar from './components/RefineBar';
 import Result from './components/Result';
 import DiagramHistory from './components/DiagramHistory';
-import PDFViewer from './PDFViewer';
 import { saveHistoryEntry, type HistoryEntry } from './utils/history';
 import { useBackendHealth } from './hooks/useBackendHealth';
 import { normalizeFlowchartDirection, loadSavedTheme, saveTheme } from './utils/diagram';
 
 import type { DiagramTypeOption } from '@shared/types';
+
+const PDFViewer = lazy(() => import('./PDFViewer'));
 
 /**
  * Main application component definition
@@ -237,12 +238,14 @@ export default function App() {
       </header>
 
       {uploadedFile && uploadedFile.type === 'application/pdf' ? (
-        <PDFViewer
-          file={uploadedFile}
-          onClose={() => setUploadedFile(null)}
-          requestDiagram={requestDiagram}
-          diagramType={diagramType}
-        />
+        <Suspense fallback={<div className="pdf-loading-state" role="status">Loading PDF viewer…</div>}>
+          <PDFViewer
+            file={uploadedFile}
+            onClose={() => setUploadedFile(null)}
+            requestDiagram={requestDiagram}
+            diagramType={diagramType}
+          />
+        </Suspense>
       ) : (
         <section className="section-top" aria-label="Diagram input tools">
           <div className="editor-container">

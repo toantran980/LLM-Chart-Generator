@@ -60,10 +60,10 @@ export function createApp() {
   const llmRateLimit = createLlmRateLimiter();
   const apiAuth = requireApiSecret();
 
-  app.get('/health', (_req, res) => {
+  app.get('/health', asyncHandler(async (_req, res) => {
     const fallback = !isLlmConfigured();
     const mem = process.memoryUsage();
-    const { getMetrics } = metrics;
+    const metricsSnapshot = await metrics.getMetricsSnapshot();
     res.json({
       ok: true,
       fallback,
@@ -76,9 +76,9 @@ export function createApp() {
         heapUsed: mem.heapUsed,
         heapTotal: mem.heapTotal,
       },
-      metrics: getMetrics(),
+      metrics: metricsSnapshot,
     });
-  });
+  }));
 
   app.get('/ready', asyncHandler(async (_req, res) => {
     const [database, llm, rateLimiter] = await Promise.all([
@@ -98,10 +98,11 @@ export function createApp() {
     });
   }));
 
-  app.get('/metrics', (_req, res) => {
+  app.get('/metrics', asyncHandler(async (_req, res) => {
     res.setHeader('Content-Type', 'text/plain; version=0.0.4; charset=utf-8');
-    res.send(metrics.getPrometheusMetrics());
-  });
+    const snapshot = await metrics.getMetricsSnapshot();
+    res.send(metrics.getPrometheusMetrics(snapshot));
+  }));
 
   app.get('/metrics/providers', asyncHandler(async (_req, res) => {
     const durable = await metrics.getDurableProviderMetrics();

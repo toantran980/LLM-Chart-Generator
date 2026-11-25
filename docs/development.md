@@ -46,6 +46,11 @@ OLLAMA_MODEL=qwen3:8b
 | `npm run db:migrate` | Apply database migrations |
 | `npm run db:cleanup` | Run diagram retention cleanup manually |
 | `npm run test:smoke` | Run the HTTP smoke-test script against configured URLs |
+| `npm run capacity:check` | Run a bounded local fallback, validation, and rate-limit check; no external services are contacted |
+| `npm run client:budget` | Check built client bundle-size budgets |
+| `npm run release:check` | Verify client/server versions against a release tag |
+
+Run `npm test` for the server and client test suites. `npm run capacity:check` builds the server before running its local check; the reported fallback throughput is not a hosted LLM capacity measurement.
 
 ## Docker
 

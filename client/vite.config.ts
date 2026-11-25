@@ -6,6 +6,16 @@ import path from 'path'
 export default defineConfig({
   envDir: path.resolve(__dirname, '..'),
   plugins: [react()],
+  build: {
+    manifest: true,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes('/node_modules/pdfjs-dist/')) return 'pdfjs';
+        },
+      },
+    },
+  },
   resolve: {
     alias: {
       '@shared': path.resolve(__dirname, '../shared'),

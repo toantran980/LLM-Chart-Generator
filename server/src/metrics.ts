@@ -32,6 +32,7 @@ export interface ProviderRequestMetric {
 const endpointStats = new Map<string, RequestMetric>();
 const providerStats = new Map<string, ProviderRequestMetric>();
 let totalRequests = 0;
+let total5xxErrors = 0;
 let fallbackCount = 0;
 let lastError: LastError | null = null;
 
@@ -49,6 +50,7 @@ export function recordRequest(path: string, statusCode: number, durationMs: numb
   if (statusCode >= 400) stat.errors += 1;
   endpointStats.set(path, stat);
   totalRequests += 1;
+  if (statusCode >= 500) total5xxErrors += 1;
 
   const redis = getRedisClient();
   if (redis) {
@@ -56,7 +58,9 @@ export function recordRequest(path: string, statusCode: number, durationMs: numb
       redis.incr('metrics:totalRequests'),
       statusCode >= 400 ? redis.incr('metrics:totalErrors') : Promise.resolve(),
       statusCode >= 500 ? redis.incr('metrics:5xxErrors') : Promise.resolve(),
+      redis.sadd('metrics:endpoints', path),
       redis.hincrby(`metrics:endpoint:${path}`, 'count', 1),
+      redis.hset(`metrics:endpoint:${path}`, { lastMs: Math.round(durationMs) }),
       statusCode >= 400 ? redis.hincrby(`metrics:endpoint:${path}`, 'errors', 1) : Promise.resolve(),
     ]).catch((err) => {
       log('warn', 'Failed to update durable metrics in Redis', { error: String(err) });
@@ -208,18 +212,22 @@ export function recordError(err: { message?: string; code?: string; statusCode?:
 export async function getDurableMetrics(): Promise<{
   totalRequests: number;
   totalErrors: number;
+  total5xxErrors: number;
   fallbackCount: number;
   lastError: LastError | null;
+  endpoints: Record<string, RequestMetric>;
 } | null> {
   const redis = getRedisClient();
   if (!redis) return null;
 
   try {
-    const [reqs, errs, fallbacks, lastErrRaw] = await Promise.all([
+    const [reqs, errs, serverErrs, fallbacks, lastErrRaw, endpointPaths] = await Promise.all([
       redis.get<number>('metrics:totalRequests'),
       redis.get<number>('metrics:totalErrors'),
+      redis.get<number>('metrics:5xxErrors'),
       redis.get<number>('metrics:fallbackCount'),
       redis.get<string>('metrics:lastError'),
+      redis.smembers('metrics:endpoints'),
     ]);
 
     let parsedLastError: LastError | null = null;
@@ -227,11 +235,23 @@ export async function getDurableMetrics(): Promise<{
       parsedLastError = typeof lastErrRaw === 'string' ? JSON.parse(lastErrRaw) : (lastErrRaw as LastError);
     }
 
+    const endpointRows = await Promise.all(((endpointPaths ?? []) as string[]).map(async (path) => {
+      const data = await redis.hgetall(`metrics:endpoint:${path}`);
+      const raw = (data ?? {}) as Record<string, string | number>;
+      return [path, {
+        count: Number(raw.count ?? 0) || 0,
+        errors: Number(raw.errors ?? 0) || 0,
+        lastMs: Number(raw.lastMs ?? 0) || 0,
+      }] as const;
+    }));
+
     return {
       totalRequests: reqs ?? totalRequests,
       totalErrors: errs ?? 0,
+      total5xxErrors: serverErrs ?? 0,
       fallbackCount: fallbacks ?? fallbackCount,
       lastError: parsedLastError ?? lastError,
+      endpoints: Object.fromEntries(endpointRows),
     };
   } catch (err) {
     log('warn', 'Failed to fetch durable metrics from Redis', { error: String(err) });
@@ -242,28 +262,49 @@ export async function getDurableMetrics(): Promise<{
 export function getMetrics() {
   return {
     totalRequests,
+    totalErrors: [...endpointStats.values()].reduce((sum, stat) => sum + stat.errors, 0),
+    total5xxErrors,
     fallbackCount,
     lastError,
     endpoints: Object.fromEntries(endpointStats),
     providers: Object.fromEntries(providerStats),
-    durableStore: Boolean(process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN),
+    durableConfigured: Boolean(process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN),
+    durableStore: false,
   };
 }
 
-export function getPrometheusMetrics(): string {
-  const m = getMetrics();
+export async function getMetricsSnapshot() {
+  const local = getMetrics();
+  const durable = await getDurableMetrics();
+  if (!durable) return { ...local, durableStore: false };
+  return { ...local, ...durable, durableStore: true };
+}
+
+export function getPrometheusMetrics(m = getMetrics()): string {
   const lines: string[] = [
     '# HELP http_requests_total Total number of HTTP requests processed.',
     '# TYPE http_requests_total counter',
     `http_requests_total ${m.totalRequests}`,
     '',
+    '# HELP http_requests_errors_total Total number of HTTP requests with a 4xx or 5xx response.',
+    '# TYPE http_requests_errors_total counter',
+    `http_requests_errors_total ${m.totalErrors}`,
+    '',
+    '# HELP http_requests_5xx_total Total number of HTTP requests with a 5xx response.',
+    '# TYPE http_requests_5xx_total counter',
+    `http_requests_5xx_total ${m.total5xxErrors}`,
+    '',
     '# HELP llm_fallback_generations_total Total number of diagram generations served by local fallback parser.',
     '# TYPE llm_fallback_generations_total counter',
     `llm_fallback_generations_total ${m.fallbackCount}`,
     '',
+    '# HELP llm_chart_metrics_store_durable Whether the HTTP and fallback counters are read from shared Redis.',
+    '# TYPE llm_chart_metrics_store_durable gauge',
+    `llm_chart_metrics_store_durable ${m.durableStore ? 1 : 0}`,
+    '',
   ];
 
-  for (const [path, stat] of endpointStats.entries()) {
+  for (const [path, stat] of Object.entries(m.endpoints)) {
     const sanitizedPath = path.replace(/"/g, '\\"');
     lines.push(`http_endpoint_requests_total{path="${sanitizedPath}"} ${stat.count}`);
     lines.push(`http_endpoint_errors_total{path="${sanitizedPath}"} ${stat.errors}`);
@@ -297,6 +338,7 @@ export function resetMetrics(): void {
   endpointStats.clear();
   providerStats.clear();
   totalRequests = 0;
+  total5xxErrors = 0;
   fallbackCount = 0;
   lastError = null;
 }

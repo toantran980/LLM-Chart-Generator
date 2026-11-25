@@ -13,11 +13,13 @@
     "db:migrate": "cd server && npm run db:migrate",
     "test": "npm run server:test && npm run client:test",
     "test:smoke": "node scripts/smoke-test.mjs",
+    "capacity:check": "npm run server:build && node scripts/capacity-check.mjs",
     "server:dev": "cd server && npm run dev",
     "server:build": "cd server && npm run build",
     "server:test": "cd server && npm test",
     "client:dev": "cd client && npm run dev",
     "client:build": "cd client && npm run build",
+    "client:budget": "node scripts/check-client-bundle.mjs",
     "client:lint": "cd client && npm run lint",
     "client:test": "cd client && npm test",
     "release:check": "node scripts/check-release-version.mjs"

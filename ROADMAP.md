@@ -21,7 +21,6 @@ Items are ideas, not commitments or dated releases. Revisit priorities as user n
 
 - [ ] Track diagram type and direction usage.
 - [ ] Build a lightweight usage dashboard for generation volume, popular diagram types, and error rates.
-- [ ] Measure provider latency and token usage to inform cost controls.
 
 ### Export and templates
 

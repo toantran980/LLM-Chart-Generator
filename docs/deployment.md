@@ -60,9 +60,43 @@ This backend currently uses Upstash's REST API, configured by `UPSTASH_REDIS_RES
 
 When Upstash is configured, `/ready` checks its connectivity. When it is not configured, readiness reports the in-memory rate-limit store as ready; it does not imply cross-instance limits.
 
+## Capacity and external service limits
+
+The application has request and time limits, but it does not set a maximum number of simultaneous LLM requests or maintain a provider queue. Current defaults include 20 requests per IP per 60-second window, 200 per IP per day, 1,000 globally per day, a 15,000-character prompt limit, a 1 MB JSON body limit, a 60-second provider timeout, and requested completion limits of 1,000 tokens (500 for Mermaid repair). Bearer callers also have separate identity and IP quotas. These are application safeguards, not a capacity guarantee; changeable environment settings can alter several quotas.
+
+Concurrency depends on request rate and provider response time. As a planning estimate, concurrent provider calls are approximately requests per second multiplied by average provider response time in seconds. For example, 2 requests/second with a 30-second average response time implies about 60 simultaneous calls. This is an estimate, not a measured production capacity. The app currently has no in-flight semaphore to cap that number.
+
+Use `npm run capacity:check` for a bounded local check of the fallback parser, validation, and rate-limit behavior. It does not contact an LLM, database, Redis, or deployed service. `npm run server:test` exercises mocked failure cases, including provider timeouts and database errors. Neither command measures hosted provider throughput or proves capacity under production traffic. A hosted load test should use a controlled staging service and explicit provider spending limits.
+
+External capacity is plan- and configuration-specific; check the service dashboards before setting a production concurrency target:
+
+| Service | Capacity factors and checks |
+| --- | --- |
+| Neon Postgres | Connection limits depend on compute size. Use the pooled connection string for application traffic and check the current plan's `max_connections` and usage in Neon’s [connection pooling docs](https://neon.com/docs/connect/connection-pooling). |
+| Upstash Redis | Request/command throughput, storage, and monthly command allowance depend on the selected plan. The Free plan currently lists 256 MB and 500,000 commands/month; each Redis operation consumes commands. Check current usage and plan limits in the [Upstash pricing page](https://upstash.com/pricing/redis). |
+| Render | Instance resources and horizontal scaling depend on the service plan. Free web services are limited to one instance and do not scale horizontally; check the current [scaling documentation](https://render.com/docs/scaling) and service plan. |
+| OpenAI | Request and token rate limits vary by model and project/account. Check the [rate-limit guide](https://developers.openai.com/api/docs/guides/rate-limits) and Limits page for the exact production project and model; this repo cannot infer those account limits. |
+| OpenRouter | Paid model limits generally follow the upstream provider; free-model limits are separately capped and can change. The current free tier lists 20 requests/minute and 50 requests/day; accounts that have purchased at least $10 in credits get a 1,000/day free-model limit. Check [current pricing and limits](https://openrouter.ai/pricing). The app's model setting is currently hardcoded, so a custom OpenAI-compatible URL needs a compatible model endpoint before treating OpenRouter as supported. |
+| Ollama | Parallelism depends on available memory, model size, and configuration. Ollama's `OLLAMA_NUM_PARALLEL` controls parallel requests; its queue is bounded (default 512) and can reject requests when overloaded. Check the [Ollama FAQ](https://github.com/ollama/ollama/blob/main/docs/faq.mdx) and host resources. |
+
+No production concurrent-request target is established yet. Set one only after measuring the actual Render instance, database and Redis plans, provider project limits, and representative prompt latency together.
+
 ## Monitoring
 
-`SENTRY_DSN` is optional. Without it, the service still runs but does not send exceptions to Sentry. Add the DSN to the Render backend environment and configure Sentry alert rules separately. `/metrics` exposes process-local HTTP and provider metrics in Prometheus format. `/metrics/providers` returns provider aggregates from Upstash when configured, or process-local aggregates otherwise. Provider-reported token counts are used when available; otherwise prompt tokens are estimated from input length and completion tokens use the requested output limit. OpenAI cost estimates require both per-million-token price variables and use those configured rates. Ollama cost is not estimated.
+`SENTRY_DSN` is optional. Without it, the service still runs but does not send exceptions to Sentry. Server errors sent to Sentry include `error_code`, `http_status`, `route`, and `method` tags when available. `/health` and `/metrics` use shared HTTP and fallback counters from Upstash when configured and reachable; otherwise they report process-local values. `/metrics/providers` returns provider aggregates from Upstash when configured, or process-local aggregates otherwise. Provider-reported token counts are used when available; otherwise prompt tokens are estimated from input length and completion tokens use the requested output limit. OpenAI cost estimates require both per-million-token price variables and use those configured rates. Ollama cost is not estimated.
+
+### Suggested alert rules
+
+Create and test these rules in the monitoring service; setting `SENTRY_DSN` only connects error reporting and does not create alerts. Sentry issue alerts can use event-count thresholds and filters. Use the `error_code` tag for targeted rules:
+
+| Alert | Suggested condition |
+| --- | --- |
+| Elevated server errors | More than 5 error events with `http_status` at least 500 in 5 minutes |
+| LLM failures | More than 3 events with `error_code:LLM_ERROR` in 5 minutes |
+| LLM timeouts | At least 1 event with `error_code:LLM_TIMEOUT` in 5 minutes |
+| Database failures | At least 1 event with `error_code:DATABASE_ERROR` in 5 minutes |
+
+For request error-rate alerts, scrape `/metrics` and alert on `rate(http_requests_5xx_total[5m]) / rate(http_requests_total[5m])`; require nonzero request traffic to avoid division by zero. Sentry issue alerts do not configure OpenAI spending notifications; configure budget limits and spend alerts in the OpenAI account. These rules still require a notification target and verification in the external dashboard.
 
 ## Rollback
 
@@ -80,6 +114,6 @@ In the Render Dashboard, open the web service’s **Deploys** page, select a rec
 2. Run `npm run db:migrate` as a release/pre-deploy step.
 3. Configure `OPENAI_API_KEY`, `ALLOWED_ORIGIN`, and the desired auth settings in Render.
 4. If using shared rate limits, configure both Upstash REST variables and verify `/ready` reports `rateLimiter.store` as `upstash`.
-5. Set `SENTRY_DSN` only if you want Sentry reporting, then configure alert rules in Sentry.
+5. Set `SENTRY_DSN` only if you want Sentry reporting, then create and verify the alert rules in [Suggested alert rules](#suggested-alert-rules).
 6. Configure Vercel's `VITE_API_BASE` and optional matching `VITE_APP_API_KEY`.
 7. Verify the deployment with `/health`, `/ready`, and an end-to-end generation/share flow.
