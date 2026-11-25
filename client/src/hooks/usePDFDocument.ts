@@ -88,6 +88,7 @@ export function usePDFDocument(file: File | null): UsePDFDocumentResult {
         setLoading(false);
 
         // Set up intersection observer for lazy rendering
+        // lazy rendering: only render pages when they are about to come into view
         observer = new IntersectionObserver(
           async (entries) => {
             for (const entry of entries) {
